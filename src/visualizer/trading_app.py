@@ -57,6 +57,7 @@ COLOR_AMBER_DG = (245, 158, 11)         # Hippocampus DG Amber
 COLOR_BENCHMARK_CYAN = (6, 182, 212)    # Buy & Hold Cyan
 COLOR_SMA_SHORT = (250, 204, 21)        # SMA 5 Yellow
 COLOR_SMA_LONG = (139, 92, 246)         # SMA 20 Purple
+COLOR_SMA200_ORANGE = (249, 115, 22)    # SMA 200 Neon Orange
 COLOR_SWR_GOLD = (251, 191, 36)         # SWR Replay Gold
 
 
@@ -422,6 +423,22 @@ class TradingVisualizerApp:
             if len(sma20_pts) >= 2:
                 pygame.draw.lines(self.screen, COLOR_SMA_LONG, False, sma20_pts, 2)
 
+        # Draw SMA 200 (Neon Orange)
+        if len(self.env.prices) >= 200:
+            sma200_pts = []
+            for i in range(len(visible_prices)):
+                global_i = start_idx + i
+                if global_i >= 199:
+                    val = float(np.mean(self.env.prices[global_i - 199: global_i + 1]))
+                    sma200_pts.append(to_screen(i, val))
+            if len(sma200_pts) >= 2:
+                pygame.draw.lines(self.screen, COLOR_SMA200_ORANGE, False, sma200_pts, 2)
+
+        # Indicator Legends inside top chart
+        self.screen.blit(self.fonts['small'].render("— SMA 5", True, COLOR_SMA_SHORT), (chart_x + 10, chart_y + 8))
+        self.screen.blit(self.fonts['small'].render("— SMA 20", True, COLOR_SMA_LONG), (chart_x + 85, chart_y + 8))
+        self.screen.blit(self.fonts['small'].render("— SMA 200", True, COLOR_SMA200_ORANGE), (chart_x + 165, chart_y + 8))
+
         # Draw Executed Trade Markers (Buy = Green ▲, Sell = Red ▼)
         for t_step, t_action, t_price in self.executed_trades:
             if start_idx <= t_step <= step_idx:
@@ -433,12 +450,12 @@ class TradingVisualizerApp:
                     pygame.draw.polygon(self.screen, COLOR_BEAR_RED, [(tx, ty + 12), (tx - 6, ty), (tx + 6, ty)])
 
     def draw_equity_panel(self):
-        """Draw portfolio equity curve vs. Buy & Hold benchmark and key financial telemetry."""
+        """Draw portfolio equity curve vs. Buy & Hold and SMA 200 benchmarks and key financial telemetry."""
         panel_rect = pygame.Rect(20, 435, 800, 305)
         pygame.draw.rect(self.screen, COLOR_PANEL_BG, panel_rect, border_radius=10)
         pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, panel_rect, width=1, border_radius=10)
 
-        self.screen.blit(self.fonts['title'].render("PORTFOLIO NET WORTH VS. BUY & HOLD BENCHMARK", True, COLOR_TEXT_PRIMARY), (35, 450))
+        self.screen.blit(self.fonts['title'].render("PORTFOLIO NET WORTH VS. BENCHMARKS (BUY & HOLD + SMA 200)", True, COLOR_TEXT_PRIMARY), (35, 450))
 
         # Chart area for Equity Curves
         ec_x, ec_y, ec_w, ec_h = 35, 480, 480, 240
@@ -446,9 +463,13 @@ class TradingVisualizerApp:
 
         hist = self.env.portfolio_history
         bench = self.env.benchmark_history
+        sma200_hist = getattr(self.env, "sma200_history", [])
         if len(hist) >= 2:
-            min_v = min(float(np.min(hist)), float(np.min(bench))) * 0.98
-            max_v = max(float(np.max(hist)), float(np.max(bench))) * 1.02
+            all_vals = list(hist) + list(bench)
+            if len(sma200_hist) > 0:
+                all_vals.extend(sma200_hist)
+            min_v = float(np.min(all_vals)) * 0.98
+            max_v = float(np.max(all_vals)) * 1.02
             v_range = max(1.0, max_v - min_v)
 
             def to_ec_screen(i, val):
@@ -458,37 +479,52 @@ class TradingVisualizerApp:
 
             bench_pts = [to_ec_screen(i, float(v)) for i, v in enumerate(bench)]
             agent_pts = [to_ec_screen(i, float(v)) for i, v in enumerate(hist)]
+            sma200_pts = [to_ec_screen(i, float(v)) for i, v in enumerate(sma200_hist)] if len(sma200_hist) >= 2 else []
 
             pygame.draw.lines(self.screen, COLOR_BENCHMARK_CYAN, False, bench_pts, 1)
+            if len(sma200_pts) >= 2:
+                pygame.draw.lines(self.screen, COLOR_SMA200_ORANGE, False, sma200_pts, 2)
             pygame.draw.lines(self.screen, COLOR_BULL_GREEN, False, agent_pts, 2)
 
             # Legends
-            self.screen.blit(self.fonts['small'].render("— Hippocampal Agent", True, COLOR_BULL_GREEN), (ec_x + 10, ec_y + 10))
-            self.screen.blit(self.fonts['small'].render("— Buy & Hold Benchmark", True, COLOR_BENCHMARK_CYAN), (ec_x + 150, ec_y + 10))
+            self.screen.blit(self.fonts['small'].render("— AI Agent", True, COLOR_BULL_GREEN), (ec_x + 10, ec_y + 10))
+            self.screen.blit(self.fonts['small'].render("— Buy & Hold", True, COLOR_BENCHMARK_CYAN), (ec_x + 100, ec_y + 10))
+            self.screen.blit(self.fonts['small'].render("— SMA 200 Rule", True, COLOR_SMA200_ORANGE), (ec_x + 205, ec_y + 10))
 
         # Telemetry Stats Table on Right Side of Equity Panel
-        stat_x = 535
-        stat_y = 480
+        stat_x = 525
+        stat_y = 472
         ret_pct = ((self.env.net_worth - self.env.initial_cash) / self.env.initial_cash) * 100.0
         ret_color = COLOR_BULL_GREEN if ret_pct >= 0 else COLOR_BEAR_RED
         win_rate = (self.env.winning_trades / max(1, self.env.total_trades)) * 100.0
         drawdown_pct = ((self.env.peak_net_worth - self.env.net_worth) / max(1e-5, self.env.peak_net_worth)) * 100.0
 
+        bh_val = bench[-1] if len(bench) > 0 else self.env.initial_cash
+        bh_ret = ((bh_val - self.env.initial_cash) / self.env.initial_cash) * 100.0
+
+        sma200_val = sma200_hist[-1] if len(sma200_hist) > 0 else self.env.initial_cash
+        sma200_ret = ((sma200_val - self.env.initial_cash) / self.env.initial_cash) * 100.0
+        sma200_col = COLOR_BULL_GREEN if sma200_ret >= 0 else COLOR_BEAR_RED
+        sma200_trades = getattr(self.env, "sma200_trades", 0)
+        sma200_wins = getattr(self.env, "sma200_wins", 0)
+        sma200_wr = (sma200_wins / max(1, sma200_trades)) * 100.0
+
         metrics = [
-            ("NET WORTH:", f"${self.env.net_worth:,.2f}", ret_color),
-            ("CASH BALANCE:", f"${self.env.cash:,.2f}", COLOR_TEXT_PRIMARY),
-            ("SHARES HELD:", f"{self.env.shares:,} units", COLOR_SMA_SHORT),
-            ("RETURN (CUMULATIVE):", f"{ret_pct:+.2f}%", ret_color),
-            ("WIN RATE:", f"{win_rate:.1f}% ({self.env.winning_trades}/{self.env.total_trades})", COLOR_BULL_GREEN if win_rate >= 50 else COLOR_TEXT_MUTED),
+            ("AI NET WORTH:", f"${self.env.net_worth:,.2f} ({ret_pct:+.1f}%)", ret_color),
+            ("B&H NET WORTH:", f"${bh_val:,.2f} ({bh_ret:+.1f}%)", COLOR_BENCHMARK_CYAN),
+            ("SMA 200 NET WORTH:", f"${sma200_val:,.2f} ({sma200_ret:+.1f}%)", sma200_col),
+            ("AI WIN RATE:", f"{win_rate:.1f}% ({self.env.winning_trades}/{self.env.total_trades})", COLOR_BULL_GREEN if win_rate >= 50 else COLOR_TEXT_MUTED),
+            ("SMA 200 WIN RATE:", f"{sma200_wr:.1f}% ({sma200_wins}/{sma200_trades})", COLOR_SMA200_ORANGE if sma200_trades > 0 else COLOR_TEXT_MUTED),
             ("REALIZED PnL:", f"${self.env.total_realized_pnl:+,.2f}", COLOR_BULL_GREEN if self.env.total_realized_pnl >= 0 else COLOR_BEAR_RED),
             ("MAX DRAWDOWN:", f"{drawdown_pct:.2f}%", COLOR_BEAR_RED if drawdown_pct > 5.0 else COLOR_TEXT_MUTED),
+            ("CASH / SHARES:", f"${self.env.cash:,.0f} / {self.env.shares:.1f}", COLOR_TEXT_PRIMARY),
             ("TRAINED EPISODES:", f"{self.total_trained_episodes:,} EP", COLOR_SWR_GOLD)
         ]
 
         for i, (label, val, col) in enumerate(metrics):
-            yy = stat_y + (i * 28)
+            yy = stat_y + (i * 26)
             self.screen.blit(self.fonts['small'].render(label, True, COLOR_TEXT_SECONDARY), (stat_x, yy))
-            self.screen.blit(self.fonts['mono'].render(val, True, col), (stat_x + 130, yy))
+            self.screen.blit(self.fonts['mono'].render(val, True, col), (stat_x + 140, yy))
 
     def draw_hippocampal_panel(self):
         """Draw Dentate Gyrus granule cells, CA3 sequence depth, and alert banners."""

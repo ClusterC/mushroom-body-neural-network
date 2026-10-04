@@ -148,6 +148,24 @@ class TestStockTradingEnv(unittest.TestCase):
             self.assertGreater(info["alloc_factor"], 0.0)
             self.assertGreaterEqual(info["atr_pct"], 0.0)
 
+    def test_sma200_rule_benchmark_tracking(self):
+        env = StockTradingEnv(initial_cash=10000.0, max_steps=50, seed=42)
+        obs = env.reset()
+        self.assertEqual(len(env.sma200_history), 1)
+        self.assertEqual(env.sma200_history[0], 10000.0)
+
+        # Advance 10 steps
+        for _ in range(10):
+            obs, rew, done, info = env.step(HOLD)
+            self.assertIn("sma200_val", info)
+            self.assertIn("sma_200", info)
+            self.assertGreater(info["sma200_val"], 0.0)
+            self.assertGreater(info["sma_200"], 0.0)
+
+        self.assertEqual(len(env.sma200_history), 11)
+        sma200 = env.get_sma200()
+        self.assertGreater(sma200, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

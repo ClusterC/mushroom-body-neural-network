@@ -102,7 +102,8 @@ class StockTradingEnv:
         fee_pct: float = 0.001,        # 0.10% commission fee
         asset_profile: str = "TECH_MOMENTUM",
         seed: Optional[int] = None,
-        csv_path: Optional[str] = None
+        csv_path: Optional[str] = None,
+        warmup_steps: int = 30
     ):
         self.initial_cash = float(initial_cash)
         self.max_steps = int(max_steps)
@@ -111,6 +112,7 @@ class StockTradingEnv:
         self.asset_profile = asset_profile
         self.seed = seed
         self.csv_path = csv_path
+        self.warmup_steps = int(warmup_steps)
         self.rng = np.random.default_rng(seed)
 
         # Market data arrays
@@ -169,13 +171,16 @@ class StockTradingEnv:
             self.highs = np.array(highs, dtype=np.float64)
             self.lows = np.array(lows, dtype=np.float64)
             self.volumes = np.array(vols, dtype=np.float64)
-            self.warmup_steps = 30
+            if len(self.prices) > 400 and self.warmup_steps <= 30:
+                self.warmup_steps = 200
+            elif len(self.prices) <= self.warmup_steps + 10:
+                self.warmup_steps = max(10, len(self.prices) // 4)
             if len(self.prices) > self.max_steps + self.warmup_steps:
                 self.max_steps = len(self.prices) - self.warmup_steps - 2
             return
 
         profile = ASSET_PROFILES.get(self.asset_profile, ASSET_PROFILES["TECH_MOMENTUM"])
-        total_len = self.max_steps + 40
+        total_len = self.max_steps + self.warmup_steps + 20
         dt = 1.0 / 252.0
         base_price = profile.get("base_price", 100.0)
         regimes = profile.get("regimes", [
@@ -195,33 +200,33 @@ class StockTradingEnv:
         vols = [1_000_000.0]
 
         curr_p = base_price
-        for drift, vol, duration in regimes:
-            for _ in range(duration):
-                if len(prices) >= total_len:
-                    break
-                shock = self.rng.standard_normal()
-                jump = 0.0
-                if self.rng.random() < jump_prob:
-                    jump = self.rng.choice([-1, 1]) * self.rng.uniform(jump_min, jump_max)
+        while len(prices) < total_len:
+            for drift, vol, duration in regimes:
+                for _ in range(duration):
+                    if len(prices) >= total_len:
+                        break
+                    shock = self.rng.standard_normal()
+                    jump = 0.0
+                    if self.rng.random() < jump_prob:
+                        jump = self.rng.choice([-1, 1]) * self.rng.uniform(jump_min, jump_max)
 
-                ret = (drift - 0.5 * vol**2) * dt + vol * np.sqrt(dt) * shock + jump
-                curr_p = max(1.0, curr_p * np.exp(ret))
+                    ret = (drift - 0.5 * vol**2) * dt + vol * np.sqrt(dt) * shock + jump
+                    curr_p = max(1.0, curr_p * np.exp(ret))
 
-                intraday_vol = curr_p * vol * np.sqrt(dt) * self.rng.uniform(0.8, 1.8)
-                h = curr_p + abs(intraday_vol * self.rng.uniform(0.3, 1.0))
-                l = max(0.5, curr_p - abs(intraday_vol * self.rng.uniform(0.3, 1.0)))
-                v = max(100_000.0, 1_000_000.0 * (1.0 + 2.0 * abs(ret)) * self.rng.uniform(0.7, 1.4))
+                    intraday_vol = curr_p * vol * np.sqrt(dt) * self.rng.uniform(0.8, 1.8)
+                    h = curr_p + abs(intraday_vol * self.rng.uniform(0.3, 1.0))
+                    l = max(0.5, curr_p - abs(intraday_vol * self.rng.uniform(0.3, 1.0)))
+                    v = max(100_000.0, 1_000_000.0 * (1.0 + 2.0 * abs(ret)) * self.rng.uniform(0.7, 1.4))
 
-                prices.append(curr_p)
-                highs.append(h)
-                lows.append(l)
-                vols.append(v)
+                    prices.append(curr_p)
+                    highs.append(h)
+                    lows.append(l)
+                    vols.append(v)
 
         self.prices = np.array(prices, dtype=np.float64)
         self.highs = np.array(highs, dtype=np.float64)
         self.lows = np.array(lows, dtype=np.float64)
         self.volumes = np.array(vols, dtype=np.float64)
-        self.warmup_steps = 30
 
     def reset(self) -> np.ndarray:
         """Reset the environment to the initial state."""
@@ -243,6 +248,15 @@ class StockTradingEnv:
         self.winning_trades = 0
         self.losing_trades = 0
         self.total_realized_pnl = 0.0
+
+        # SMA-200 Rule Strategy Portfolio Tracking
+        self.sma200_cash = self.initial_cash
+        self.sma200_shares = 0.0
+        self.sma200_entry_price = 0.0
+        self.sma200_history = [self.initial_cash]
+        self.sma200_trades = 0
+        self.sma200_wins = 0
+        self.sma200_losses = 0
 
         return self.get_observation()
 
@@ -533,6 +547,37 @@ class StockTradingEnv:
         benchmark_val = self.initial_cash * (new_close / start_price)
         self.benchmark_history.append(benchmark_val)
 
+        # SMA-200 Rule Benchmark Tracking (Pure Trend-Following: Close > SMA 200 => Buy, Close < SMA 200 => Sell)
+        idx = self.current_step
+        if idx >= 199:
+            sma_200 = float(np.mean(self.prices[idx - 199 : idx + 1]))
+        else:
+            sma_200 = float(np.mean(self.prices[: idx + 1]))
+
+        if new_close > sma_200:
+            # Bullish Trend: Buy 100% all-in if in cash, or hold
+            if self.sma200_shares <= 0.0 and self.sma200_cash >= 10.0:
+                cost_basis = new_close * (1.0 + self.fee_pct + self.slippage_pct)
+                shares_to_buy = self.sma200_cash / cost_basis
+                self.sma200_shares = shares_to_buy
+                self.sma200_cash = 0.0
+                self.sma200_entry_price = cost_basis
+        elif new_close < sma_200:
+            # Bearish Trend: Liquidate 100% to cash if holding
+            if self.sma200_shares > 0.0:
+                proceeds = self.sma200_shares * new_close * (1.0 - self.fee_pct - self.slippage_pct)
+                trade_ret = (new_close - self.sma200_entry_price) / max(1e-5, self.sma200_entry_price)
+                self.sma200_trades += 1
+                if trade_ret > 0:
+                    self.sma200_wins += 1
+                else:
+                    self.sma200_losses += 1
+                self.sma200_cash = proceeds
+                self.sma200_shares = 0.0
+
+        sma200_val = self.sma200_cash + (self.sma200_shares * new_close)
+        self.sma200_history.append(sma200_val)
+
         # Check termination
         if self.current_step >= len(self.prices) - 2 or (self.current_step - self.warmup_steps) >= self.max_steps:
             self.done = True
@@ -548,9 +593,20 @@ class StockTradingEnv:
             "total_trades": self.total_trades,
             "win_rate": (self.winning_trades / max(1, self.total_trades)),
             "benchmark_val": benchmark_val,
+            "sma200_val": sma200_val,
+            "sma_200": sma_200,
+            "sma200_trades": self.sma200_trades,
+            "sma200_win_rate": (self.sma200_wins / max(1, self.sma200_trades)),
             "inaction_bars": self.inaction_bars,
             "atr_pct": self.last_atr_pct,
             "alloc_factor": self.last_alloc_factor
         }
 
         return self.get_observation(), float(reward), self.done, info
+
+    def get_sma200(self) -> float:
+        """Calculate 200-period Simple Moving Average at the current step."""
+        idx = self.current_step
+        if idx >= 199:
+            return float(np.mean(self.prices[idx - 199 : idx + 1]))
+        return float(np.mean(self.prices[: idx + 1]))
