@@ -30,7 +30,14 @@ except Exception:
     GPU_MEM_INFO = "N/A"
 
 from src.envs.stock_trading_env import StockTradingEnv, HOLD, BUY, SELL, ACTION_NAMES
-from src.models.hippocampal_trading_mb import HippocampalTradingMB
+from src.models.hippocampal_trading_mb import (
+    HippocampalTradingMB,
+    REGIME_NAMES,
+    REGIME_BULL_EXPANSION,
+    REGIME_BEAR_DISTRIBUTION,
+    REGIME_CHOPPY_SIDEWAYS,
+    REGIME_VOLATILE_SHOCK
+)
 from src.visualizer.components import (
     UIButton,
     COLOR_BG,
@@ -86,9 +93,13 @@ class TradingVisualizerApp:
             ("INDEX_ETF", "INDEX ETF (S&P 500)", None),
             ("CRYPTO_VOLATILE", "CRYPTO (BTC VOLATILE)", None),
             ("DEFENSIVE_VALUE", "DEFENSIVE VALUE (DIVIDEND)", None),
-            ("REAL_SPY", "REAL MARKET: SPY ETF", "data/assets/SPY_historical.csv"),
-            ("REAL_AAPL", "REAL MARKET: AAPL TECH", "data/assets/AAPL_historical.csv"),
-            ("REAL_BTC", "REAL MARKET: BTC/USD", "data/assets/BTC_historical.csv"),
+            ("REAL_SPY_5Y", "REAL 5Y: SPY ETF (S&P 500)", "data/assets/SPY_5Y_historical.csv"),
+            ("REAL_AAPL_5Y", "REAL 5Y: AAPL (APPLE TECH)", "data/assets/AAPL_5Y_historical.csv"),
+            ("REAL_QQQ_5Y", "REAL 5Y: QQQ (NASDAQ 100)", "data/assets/QQQ_5Y_historical.csv"),
+            ("REAL_BTC_5Y", "REAL 5Y: BTC/USD (CRYPTO)", "data/assets/BTC_5Y_historical.csv"),
+            ("REAL_SPY", "REAL MARKET: SPY ETF (1Y)", "data/assets/SPY_historical.csv"),
+            ("REAL_AAPL", "REAL MARKET: AAPL TECH (1Y)", "data/assets/AAPL_historical.csv"),
+            ("REAL_BTC", "REAL MARKET: BTC/USD (1Y)", "data/assets/BTC_historical.csv"),
         ]
         self.asset_idx = 0
 
@@ -536,10 +547,34 @@ class TradingVisualizerApp:
             self.screen.blit(self.fonts['badge'].render(f"⚠️ CPG RISK REFLEX: {self.mb.last_cpg_reason}", True, COLOR_BEAR_RED), (860, banner_y + 8))
         else:
             norm_rect = pygame.Rect(850, banner_y, 395, 34)
-            pygame.draw.rect(self.screen, (17, 24, 39), norm_rect, border_radius=6)
-            pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, norm_rect, width=1, border_radius=6)
-            curr_action_name = ACTION_NAMES.get(self.last_action, "HOLD")
-            self.screen.blit(self.fonts['small'].render(f"CURRENT EXECUTED ORDER: {curr_action_name}", True, COLOR_TEXT_MUTED), (865, banner_y + 9))
+            regime_id = getattr(self.mb, 'last_detected_regime', REGIME_CHOPPY_SIDEWAYS)
+            conf_pct = getattr(self.mb, 'last_regime_confidence', 0.25) * 100.0
+            alloc_pct = getattr(self.env, 'last_alloc_factor', 1.0) * 100.0
+            regime_label = REGIME_NAMES.get(regime_id, "NEUTRAL")
+
+            if regime_id == REGIME_BULL_EXPANSION:
+                badge_bg = (13, 38, 28)
+                badge_border = COLOR_BULL_GREEN
+                badge_dot = COLOR_BULL_GREEN
+            elif regime_id == REGIME_BEAR_DISTRIBUTION:
+                badge_bg = (38, 15, 20)
+                badge_border = COLOR_BEAR_RED
+                badge_dot = COLOR_BEAR_RED
+            elif regime_id == REGIME_VOLATILE_SHOCK:
+                badge_bg = (35, 18, 45)
+                badge_border = (168, 85, 247)
+                badge_dot = (168, 85, 247)
+            else:
+                badge_bg = (35, 28, 15)
+                badge_border = COLOR_AMBER_DG
+                badge_dot = COLOR_AMBER_DG
+
+            pygame.draw.rect(self.screen, badge_bg, norm_rect, border_radius=6)
+            pygame.draw.rect(self.screen, badge_border, norm_rect, width=1, border_radius=6)
+            pygame.draw.circle(self.screen, badge_dot, (864, banner_y + 17), 4)
+
+            reg_text = f"REGIME: {regime_label} ({conf_pct:.0f}%) | SIZING: {alloc_pct:.0f}%"
+            self.screen.blit(self.fonts['badge'].render(reg_text, True, badge_border), (876, banner_y + 8))
 
     def draw_controls(self):
         """Draw interactive control buttons, progress load bar, and notifications."""

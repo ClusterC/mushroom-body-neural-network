@@ -4,6 +4,7 @@ Validates headless state transitions, stepping, resetting, and training routine.
 """
 
 import unittest
+import numpy as np
 
 from src.visualizer.trading_app import TradingVisualizerApp
 
@@ -64,6 +65,20 @@ class TestTradingVisualizerApp(unittest.TestCase):
         self.assertNotEqual(self.app.asset_idx, initial_idx)
         self.assertEqual(self.app.env.asset_profile, prof_key)
         self.assertEqual(len(self.app.executed_trades), 0)
+
+    def test_market_regime_classification(self):
+        regime_id, probs, conf = self.app.mb.classify_market_regime(self.app.obs)
+        self.assertIn(regime_id, [0, 1, 2, 3])
+        self.assertEqual(len(probs), 4)
+        self.assertAlmostEqual(float(np.sum(probs)), 1.0, places=4)
+        self.assertGreater(conf, 0.0)
+
+    def test_5y_multi_year_profiles_available(self):
+        keys = [p[0] for p in self.app.asset_profiles_list]
+        self.assertIn("REAL_SPY_5Y", keys)
+        self.assertIn("REAL_AAPL_5Y", keys)
+        self.assertIn("REAL_QQQ_5Y", keys)
+        self.assertIn("REAL_BTC_5Y", keys)
 
 
 if __name__ == "__main__":

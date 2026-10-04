@@ -35,7 +35,8 @@ class TestStockTradingEnv(unittest.TestCase):
         obs, reward, done, info = self.env.step(BUY)
 
         self.assertGreater(self.env.shares, 0)
-        self.assertLess(self.env.cash, curr_price)
+        self.assertLess(self.env.cash, 10000.0)
+        self.assertGreater(info["alloc_factor"], 0.0)
         self.assertEqual(info["trade_event"], "BUY")
 
         # After buying: can HOLD, CANNOT BUY again, CAN SELL
@@ -122,6 +123,30 @@ class TestStockTradingEnv(unittest.TestCase):
         obs, reward, done, info = self.env.step(BUY)
         self.assertEqual(self.env.inaction_bars, 0)
         self.assertEqual(info["inaction_bars"], 0)
+
+    def test_5y_multi_year_dataset_loading(self):
+        import os
+        csv_path = "data/assets/SPY_5Y_historical.csv"
+        if os.path.exists(csv_path):
+            env = StockTradingEnv(initial_cash=10000.0, csv_path=csv_path)
+            obs = env.reset()
+            self.assertEqual(obs.shape, (18,))
+            self.assertGreater(len(env.prices), 1000)
+            self.assertGreater(env.max_steps, 1000)
+            self.assertFalse(env.done)
+
+    def test_fractional_shares_and_atr_sizing(self):
+        import os
+        csv_path = "data/assets/BTC_5Y_historical.csv"
+        if os.path.exists(csv_path):
+            env = StockTradingEnv(initial_cash=10000.0, csv_path=csv_path)
+            obs = env.reset()
+            mask = env.get_action_mask()
+            self.assertTrue(mask[BUY])
+            obs, reward, done, info = env.step(BUY)
+            self.assertGreater(env.shares, 0.0)
+            self.assertGreater(info["alloc_factor"], 0.0)
+            self.assertGreaterEqual(info["atr_pct"], 0.0)
 
 
 if __name__ == "__main__":

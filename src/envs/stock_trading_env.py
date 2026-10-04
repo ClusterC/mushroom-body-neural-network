@@ -123,7 +123,7 @@ class StockTradingEnv:
 
         # Portfolio state
         self.cash = self.initial_cash
-        self.shares = 0
+        self.shares = 0.0
         self.entry_price = 0.0
         self.position_bars = 0
         self.inaction_bars = 0         # Consecutive bars holding cash without trading
@@ -139,6 +139,8 @@ class StockTradingEnv:
         self.losing_trades = 0
         self.total_realized_pnl = 0.0
         self.last_trade_return = 0.0
+        self.last_alloc_factor = 0.0
+        self.last_atr_pct = 0.0
 
         self._load_or_generate_market()
         self.reset()
@@ -168,6 +170,8 @@ class StockTradingEnv:
             self.lows = np.array(lows, dtype=np.float64)
             self.volumes = np.array(vols, dtype=np.float64)
             self.warmup_steps = 30
+            if len(self.prices) > self.max_steps + self.warmup_steps:
+                self.max_steps = len(self.prices) - self.warmup_steps - 2
             return
 
         profile = ASSET_PROFILES.get(self.asset_profile, ASSET_PROFILES["TECH_MOMENTUM"])
@@ -224,7 +228,7 @@ class StockTradingEnv:
         self.current_step = self.warmup_steps
         self.done = False
         self.cash = self.initial_cash
-        self.shares = 0
+        self.shares = 0.0
         self.entry_price = 0.0
         self.position_bars = 0
         self.inaction_bars = 0
@@ -251,8 +255,8 @@ class StockTradingEnv:
         """
         curr_price = self.prices[self.current_step]
         can_hold = True
-        can_buy = (self.shares == 0) and (self.cash >= curr_price * (1.0 + self.fee_pct))
-        can_sell = (self.shares > 0)
+        can_buy = (self.shares <= 0.0) and (self.cash >= 10.0)
+        can_sell = (self.shares > 0.0)
         return np.array([can_hold, can_buy, can_sell], dtype=bool)
 
     def get_observation(self) -> np.ndarray:
@@ -365,18 +369,50 @@ class StockTradingEnv:
         sma_20 = np.mean(self.prices[max(0, self.current_step - 19): self.current_step + 1])
 
         if action == BUY and mask[BUY]:
-            # Execute Long Buy with Dynamic Position Sizing (85% to 100% allocation based on signal conviction)
+            # Tactical ATR Volatility Position Sizing:
+            # Dynamically sizes allocation inversely proportional to 14-period Average True Range
+            idx = self.current_step
+            highs_14 = self.highs[idx - 13: idx + 1]
+            lows_14 = self.lows[idx - 13: idx + 1]
+            prev_closes_14 = self.prices[idx - 14: idx]
+            tr_window = np.maximum(
+                highs_14 - lows_14,
+                np.abs(highs_14 - prev_closes_14)
+            )
+            atr_14 = float(np.mean(tr_window))
+            atr_pct = atr_14 / max(1e-5, curr_price)
+            self.last_atr_pct = atr_pct
+
+            # Adaptive Volatility Sizing:
+            # Low volatility (<1.5% ATR): High exposure (0.90 - 1.00)
+            # Moderate volatility (1.5% - 3.0% ATR): Controlled exposure (0.65 - 0.85)
+            # High volatility (>3.0% ATR): Conservative exposure (0.35 - 0.50) to limit drawdown
+            if atr_pct <= 0.015:
+                base_alloc = 0.95
+            elif atr_pct <= 0.030:
+                base_alloc = 0.75
+            else:
+                base_alloc = max(0.35, 0.75 - ((atr_pct - 0.030) * 8.0))
+
             h_20 = np.max(self.highs[max(0, self.current_step - 19): self.current_step + 1])
             l_20 = np.min(self.lows[max(0, self.current_step - 19): self.current_step + 1])
             channel_pos = (curr_price - l_20) / max(1e-5, h_20 - l_20)
 
-            # Conviction allocation: 100% if in clear momentum breakout, 85% otherwise (preserving liquidity buffer)
-            alloc_factor = 1.0 if (curr_price >= sma_20 and channel_pos >= 0.6) else 0.85
+            # Boost allocation if confirmed by channel breakout and above 20-period moving average
+            if curr_price >= sma_20 and channel_pos >= 0.65:
+                alloc_factor = min(1.0, base_alloc * 1.15)
+            else:
+                alloc_factor = base_alloc
+
+            self.last_alloc_factor = alloc_factor
             available_cash = self.cash * alloc_factor
 
             exec_price = curr_price * (1.0 + self.slippage_pct)
             fee_factor = 1.0 + self.fee_pct
-            shares_to_buy = int(available_cash / (exec_price * fee_factor))
+            if curr_price > (self.cash * 0.5) or (self.csv_path and "BTC" in str(self.csv_path)):
+                shares_to_buy = float(np.round(available_cash / (exec_price * fee_factor), 6))
+            else:
+                shares_to_buy = int(available_cash / (exec_price * fee_factor))
             if shares_to_buy > 0:
                 cost = shares_to_buy * exec_price
                 fee = cost * self.fee_pct
@@ -442,7 +478,7 @@ class StockTradingEnv:
                 "bars_held": self.position_bars
             })
 
-            self.shares = 0
+            self.shares = 0.0
             self.entry_price = 0.0
             self.position_bars = 0
             trade_event = "SELL"
@@ -512,7 +548,9 @@ class StockTradingEnv:
             "total_trades": self.total_trades,
             "win_rate": (self.winning_trades / max(1, self.total_trades)),
             "benchmark_val": benchmark_val,
-            "inaction_bars": self.inaction_bars
+            "inaction_bars": self.inaction_bars,
+            "atr_pct": self.last_atr_pct,
+            "alloc_factor": self.last_alloc_factor
         }
 
         return self.get_observation(), float(reward), self.done, info

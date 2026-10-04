@@ -12,6 +12,19 @@ HOLD = 0
 BUY = 1
 SELL = 2
 
+# Market Regimes (Cognitive Map Spatial Contexts)
+REGIME_BULL_EXPANSION = 0       # Strong positive momentum, high SNR, trend-following permissive
+REGIME_BEAR_DISTRIBUTION = 1     # Breakdown, selling pressure, forced cash / Veto BUY
+REGIME_CHOPPY_SIDEWAYS = 2       # Range-bound, oscillating, minimal position sizing to avoid fees
+REGIME_VOLATILE_SHOCK = 3        # Flash crash, macro shock anomaly, immediate CPG exit
+
+REGIME_NAMES = {
+    REGIME_BULL_EXPANSION: "BULL EXPANSION",
+    REGIME_BEAR_DISTRIBUTION: "BEAR DISTRIBUTION",
+    REGIME_CHOPPY_SIDEWAYS: "CHOPPY SIDEWAYS",
+    REGIME_VOLATILE_SHOCK: "VOLATILE SHOCK"
+}
+
 FEATURE_ROLES = [
     "ROLE_RET1", "ROLE_RET5", "ROLE_RET20", "ROLE_RSI",
     "ROLE_SMA_RATIO", "ROLE_PRICE_SMA", "ROLE_VOL", "ROLE_VOL_RATIO",
@@ -77,13 +90,18 @@ class HippocampalTradingMB:
         self.action_prototypes = self.rng.uniform(0.05, 0.15, size=(dim, num_actions)).astype(np.float32)
         self._init_innate_prototypes()
 
-        # 4. Eligibility Traces for Three-Factor Plasticity
+        # 4. Cognitive Regime Prototypes (dim x 4 regimes)
+        self.num_regimes = 4
+        self.regime_prototypes = self.rng.uniform(0.05, 0.15, size=(dim, self.num_regimes)).astype(np.float32)
+        self._init_innate_regimes()
+
+        # 5. Eligibility Traces for Three-Factor Plasticity
         self.eligibility_traces = np.zeros((dim, num_actions), dtype=np.float32)
 
-        # 5. Episodic Memory Buffer for SWR Replay
+        # 6. Episodic Memory Buffer for SWR Replay
         self.episode_experiences: List[Dict[str, Any]] = []
 
-        # 6. Telemetry & Alerts
+        # 7. Telemetry & Alerts
         self.last_swr_active = False
         self.last_cpg_triggered = False
         self.last_cpg_reason = ""
@@ -93,6 +111,50 @@ class HippocampalTradingMB:
         self.last_ca3_depth = 0
         self.inaction_counter = 0
         self.peak_unrealized_pnl = 0.0
+
+        # Cognitive Regime Governor Telemetry
+        self.last_detected_regime = REGIME_CHOPPY_SIDEWAYS
+        self.last_regime_probs = np.ones(self.num_regimes) / float(self.num_regimes)
+        self.last_regime_confidence = 0.25
+
+    def _init_innate_regimes(self):
+        """Initialize innate hypervector representations for 4 market regimes."""
+        high_level = self.level_hypervectors[-1]
+        low_level = self.level_hypervectors[0]
+        mid_level = self.level_hypervectors[self.num_levels // 2]
+
+        bull_proto = (
+            self.item_memory["ROLE_TREND"] * high_level * 3.0 +
+            self.item_memory["ROLE_MOMENTUM"] * high_level * 3.0 +
+            self.item_memory["ROLE_SMA_RATIO"] * high_level * 2.5 +
+            self.item_memory["ROLE_CHANNEL"] * high_level * 2.5 +
+            self.item_memory["ROLE_VWAP"] * high_level * 2.0
+        )
+
+        bear_proto = (
+            self.item_memory["ROLE_TREND"] * low_level * 3.0 +
+            self.item_memory["ROLE_MOMENTUM"] * low_level * 2.5 +
+            self.item_memory["ROLE_CHANNEL"] * low_level * 2.5 +
+            self.item_memory["ROLE_RSI_SIG"] * high_level * 2.5
+        )
+
+        sideway_proto = (
+            self.item_memory["ROLE_TREND"] * mid_level * 2.0 +
+            self.item_memory["ROLE_VOL"] * low_level * 2.0 +
+            self.item_memory["ROLE_MOMENTUM"] * mid_level * 2.0 +
+            self.item_memory["ROLE_SMA_RATIO"] * mid_level * 2.0
+        )
+
+        shock_proto = (
+            self.item_memory["ROLE_VOL"] * high_level * 3.5 +
+            self.item_memory["ROLE_VOL_RATIO"] * high_level * 3.0 +
+            self.item_memory["ROLE_DRAWDOWN"] * high_level * 3.0
+        )
+
+        self.regime_prototypes[:, REGIME_BULL_EXPANSION] += np.maximum(0.01, bull_proto * 0.25)
+        self.regime_prototypes[:, REGIME_BEAR_DISTRIBUTION] += np.maximum(0.01, bear_proto * 0.25)
+        self.regime_prototypes[:, REGIME_CHOPPY_SIDEWAYS] += np.maximum(0.01, sideway_proto * 0.25)
+        self.regime_prototypes[:, REGIME_VOLATILE_SHOCK] += np.maximum(0.01, shock_proto * 0.30)
 
     def _init_innate_prototypes(self):
         """Initialize innate biological grounding for BUY, SELL, and HOLD prototypes."""
@@ -234,14 +296,31 @@ class HippocampalTradingMB:
             # Track highest unrealized profit achieved during this position
             self.peak_unrealized_pnl = max(self.peak_unrealized_pnl, unrealized_pnl_pct)
 
+            # Adaptive Regime-dependent Risk Envelope:
+            # Bull Expansion: Give trend room to breathe (trail 7.5% from peak, cut at -6.5%) to let profits compound
+            # Bear Distribution: Cut losses aggressively (-2.5%) and exit fast into cash
+            # Choppy Sideways / Shock: Moderate defensive stop
+            if self.last_detected_regime == REGIME_BULL_EXPANSION:
+                stop_thresh = -0.065
+                trail_thresh = 0.075
+                trail_activation = 0.070
+            elif self.last_detected_regime == REGIME_BEAR_DISTRIBUTION:
+                stop_thresh = -0.025
+                trail_thresh = 0.025
+                trail_activation = 0.020
+            else:
+                stop_thresh = self.stop_loss_pct
+                trail_thresh = self.trailing_stop_pct
+                trail_activation = 0.035
+
             # Reflex 1: Hard Stop-Loss Protection
-            if unrealized_pnl_pct <= self.stop_loss_pct:
+            if unrealized_pnl_pct <= stop_thresh:
                 return SELL, True, f"HARD STOP-LOSS ({unrealized_pnl_pct * 100:.1f}%)"
 
-            # Reflex 2: Trailing Profit Lock (locking profits before they turn into losses)
-            if self.peak_unrealized_pnl >= 0.03:
+            # Reflex 2: Trailing Profit Lock
+            if self.peak_unrealized_pnl >= trail_activation:
                 giveback = self.peak_unrealized_pnl - unrealized_pnl_pct
-                if giveback >= self.trailing_stop_pct:
+                if giveback >= trail_thresh:
                     return SELL, True, f"TRAILING PROFIT LOCK (+{unrealized_pnl_pct * 100:.1f}%)"
         else:
             self.peak_unrealized_pnl = 0.0
@@ -252,6 +331,41 @@ class HippocampalTradingMB:
 
         return intended_action, False, ""
 
+    def classify_market_regime(self, obs: np.ndarray) -> Tuple[int, np.ndarray, float]:
+        """
+        Cognitive Map Market Regime Classification:
+        Uses Dentate Gyrus (DG) ultra-sparse pattern separation and CA3 sequence attractor
+        to classify current market state into one of 4 macroeconomic regimes:
+        - REGIME_BULL_EXPANSION (0)
+        - REGIME_BEAR_DISTRIBUTION (1)
+        - REGIME_CHOPPY_SIDEWAYS (2)
+        - REGIME_VOLATILE_SHOCK (3)
+        Returns: (predicted_regime, regime_probabilities, confidence_score)
+        """
+        ec_vec = self.encode_entorhinal_cortex(obs)
+        dg_sparse = self.dentate_gyrus_separation(ec_vec)
+        ca3_sparse = self.ca3_recurrent_sequence(dg_sparse)
+
+        combined_repr = (0.50 * dg_sparse) + (0.50 * ca3_sparse)
+        norm = np.linalg.norm(combined_repr)
+        if norm > 1e-6:
+            combined_repr /= norm
+
+        # Cosine similarity with 4 cognitive regime prototypes
+        regime_scores = np.dot(combined_repr, self.regime_prototypes).astype(np.float32)
+
+        # Softmax probability distribution
+        exp_s = np.exp((regime_scores - np.max(regime_scores)) / 0.15)
+        probs = exp_s / np.sum(exp_s)
+        predicted_regime = int(np.argmax(probs))
+        confidence = float(np.max(probs))
+
+        self.last_detected_regime = predicted_regime
+        self.last_regime_probs = probs
+        self.last_regime_confidence = confidence
+
+        return predicted_regime, probs, confidence
+
     def select_action(
         self,
         obs: np.ndarray,
@@ -259,10 +373,13 @@ class HippocampalTradingMB:
         training: bool = True
     ) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray]:
         """
-        Forward pass & action readout:
-        Combines Sensory Path (DG 45%) and Sequence Path (CA3 55%), applies Softmax policy with masking,
-        and evaluates CPG Risk Reflex filter.
+        Forward pass & action readout governed by Macro Cognitive Regime:
+        Combines Sensory Path (DG 45%) and Sequence Path (CA3 55%), applies Cognitive Regime
+        permissive filtering, Softmax policy, and Spinal CPG Risk Reflex.
         """
+        # 1. Macro Cognitive Regime Classification
+        current_regime, r_probs, r_conf = self.classify_market_regime(obs)
+
         ec_vec = self.encode_entorhinal_cortex(obs)
         dg_sparse = self.dentate_gyrus_separation(ec_vec)
         ca3_sparse = self.ca3_recurrent_sequence(dg_sparse)
@@ -276,26 +393,49 @@ class HippocampalTradingMB:
         # Action Prototype Readout via Cosine Similarity
         scores = np.dot(combined_repr, self.action_prototypes).astype(np.float32)
 
-        # Dynamic Trend Sensitivity & Exploration Drive to prevent Inaction Trap
+        # 2. Permissive Gating modulated by Cognitive Regime
+        effective_mask = action_mask.copy()
         is_holding = (obs[8] > 0.5)
+
+        if current_regime == REGIME_BEAR_DISTRIBUTION:
+            # Veto BUY in Bear Distribution: strictly forbid entering new positions
+            effective_mask[BUY] = False
+            if is_holding:
+                scores[SELL] += 0.80  # Decisive exit into cash to avoid catastrophic bear drawdowns
+        elif current_regime == REGIME_VOLATILE_SHOCK:
+            # Volatility shock: veto BUY and force capital preservation
+            effective_mask[BUY] = False
+            if is_holding:
+                scores[SELL] += 0.90
+        elif current_regime == REGIME_CHOPPY_SIDEWAYS:
+            # Sideway chop: strictly avoid opening new positions to avoid fee churn
+            if not is_holding:
+                effective_mask[BUY] = False
+            scores[HOLD] += 0.35
+        elif current_regime == REGIME_BULL_EXPANSION:
+            # Bull Expansion: clear trend runway
+            if not is_holding:
+                # Enter on positive momentum confluence
+                scores[BUY] += 0.40
+            else:
+                # Biological Holding Inertia (Let Profits Run):
+                # Suppress jittery noise exits while the macro regime remains bullish
+                scores[HOLD] += 0.60
+                scores[SELL] -= 0.20
+
+        # Dynamic Trend Sensitivity
         if not is_holding:
             self.inaction_counter += 1
-            # Trend Confluence: reward BUY readiness when market is bullish
             trend_confluence = (obs[12] * 0.08) + (obs[13] * 0.08)
-            if trend_confluence > 0:
+            if trend_confluence > 0 and current_regime == REGIME_BULL_EXPANSION:
                 scores[BUY] += float(trend_confluence)
-
-            # Exploration Drive: if idling in cash for too long, boost BUY exploration
-            if self.inaction_counter > 15:
-                scores[BUY] += 0.08
         else:
             self.inaction_counter = 0
-            # Exit Confluence: boost SELL readiness if trend breaks down or overbought
             if obs[12] < 0 or obs[14] > 0.5:
-                scores[SELL] += 0.08
+                scores[SELL] += 0.15
 
         # Mask illegal actions
-        masked_scores = np.where(action_mask, scores, -1e9)
+        masked_scores = np.where(effective_mask, scores, -1e9)
 
         # Softmax Policy
         temp = max(self.temp_min, self.temperature if training else self.temp_min)
@@ -322,10 +462,18 @@ class HippocampalTradingMB:
         self.episode_experiences.append({
             "repr": combined_repr.copy(),
             "action": final_action,
-            "mask": action_mask.copy()
+            "mask": action_mask.copy(),
+            "regime": current_regime
         })
 
         return final_action, probs, dg_sparse, ca3_sparse
+
+    def update_regime_plasticity(self, reward: float, actual_regime: int):
+        """Reinforce regime prototype associations based on trade outcome and regime correctness."""
+        if 0 <= actual_regime < self.num_regimes:
+            delta = self.learning_rate * float(reward) * 0.10
+            self.regime_prototypes[:, actual_regime] += delta
+            self.regime_prototypes[:, actual_regime] = np.maximum(0.01, self.regime_prototypes[:, actual_regime])
 
     def update_plasticity(self, reward: float):
         """Three-Factor Hebbian update modulated by dopamine reward signal."""
