@@ -38,6 +38,8 @@ from src.models.hippocampal_trading_mb import (
     REGIME_CHOPPY_SIDEWAYS,
     REGIME_VOLATILE_SHOCK
 )
+from src.training.gpu_trading_trainer import GPUTradingTrainer
+
 from src.visualizer.components import (
     UIButton,
     COLOR_BG,
@@ -261,7 +263,7 @@ class TradingVisualizerApp:
             self._training_worker(n_episodes)
 
     def _training_worker(self, n_episodes: int):
-        """Worker thread executing curriculum training and driving GPU/CUDA computations."""
+        """Worker thread executing curriculum training with high-speed GPU acceleration or CPU fallback."""
         self.is_training = True
         self.gpu_active = self.has_cuda
         self.training_total_ep = n_episodes
@@ -270,18 +272,47 @@ class TradingVisualizerApp:
         self.training_status_text = f"TRAINING (0/{n_episodes})"
 
         t0 = time.time()
+
+        # Pure GPU-Accelerated Training Path (Batched Parallel CUDA Engine)
+        if self.has_cuda and self.gpu_device is not None:
+            try:
+                batch_size = min(128, n_episodes)
+                trainer = GPUTradingTrainer(self.mb, batch_size=batch_size, device=str(self.gpu_device))
+
+                def update_progress(current, total):
+                    self.training_current_ep = current
+                    self.training_progress = current / max(1, total)
+                    self.training_status_text = f"GPU TRAINING ({current}/{total})"
+
+                res = trainer.train(total_episodes=n_episodes, progress_callback=update_progress)
+                dur = time.time() - t0
+                self.total_trained_episodes += n_episodes
+                self.training_current_ep = n_episodes
+                self.training_progress = 1.0
+                self.training_win_rate = res["win_rate"]
+                self.is_training = False
+                self.gpu_active = False
+                self.training_status_text = f"COMPLETED ({n_episodes} EP | {res['win_rate']:.1f}% WIN)"
+
+                if 'train' in self.buttons:
+                    self.buttons['train'].text = "⚡ TRAIN HISTORICAL (+500 EP)"
+
+                self.show_toast(
+                    f"⚡ GPU ACCELERATED: {n_episodes} EP IN {dur:.2f}s ({res['fps']:.0f} FPS) | WIN: {res['win_rate']:.1f}% | {self.gpu_device_name}",
+                    color=COLOR_SWR_GOLD
+                )
+                return
+            except Exception as e:
+                # Rollback state if GPU pipeline encounters issues before CPU fallback
+                self.total_trained_episodes = max(0, self.total_trained_episodes - n_episodes)
+                self.training_progress = 0.0
+                pass
+
+        # CPU Fallback Loop
         total_pnl = 0.0
         wins = 0
         trades = 0
         profiles = ["TECH_MOMENTUM", "INDEX_ETF", "CRYPTO_VOLATILE", "DEFENSIVE_VALUE"]
-
-        # GPU Tensor initialization if CUDA is available
-        cuda_prototypes = None
-        if self.has_cuda and self.gpu_device is not None:
-            try:
-                cuda_prototypes = torch.from_numpy(self.mb.action_prototypes).to(self.gpu_device)
-            except Exception:
-                cuda_prototypes = None
 
         for ep in range(n_episodes):
             prof = profiles[ep % len(profiles)]
@@ -299,15 +330,6 @@ class TradingVisualizerApp:
                     self.mb.trigger_swr_episodic_replay(rew, trade_return=env_train.last_trade_return)
 
                 obs = next_obs
-
-            # Execute active GPU computation every few episodes to leverage CUDA pipeline
-            if self.has_cuda and cuda_prototypes is not None and (ep % 4 == 0 or ep == n_episodes - 1):
-                try:
-                    cuda_prototypes.copy_(torch.from_numpy(self.mb.action_prototypes).to(self.gpu_device))
-                    _ = torch.norm(cuda_prototypes, dim=0)
-                    torch.cuda.synchronize()
-                except Exception:
-                    pass
 
             total_pnl += (env_train.net_worth - env_train.initial_cash)
             wins += env_train.winning_trades

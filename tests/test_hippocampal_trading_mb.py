@@ -69,6 +69,8 @@ class TestHippocampalTradingMB(unittest.TestCase):
     def test_cpg_trailing_profit_lock(self):
         obs = np.zeros(18, dtype=np.float32)
         obs[8] = 1.0   # is_holding = True
+        self.agent.take_profit_pct = None  # Disable fixed take-profit to isolate trailing lock
+        self.agent.trailing_stop_pct = 0.02
 
         # Step 1: Peak unrealized gain reaches +4.5% (obs[9] = 0.45)
         obs[9] = 0.45
@@ -83,6 +85,15 @@ class TestHippocampalTradingMB(unittest.TestCase):
         self.assertEqual(act, SELL)
         self.assertTrue(triggered)
         self.assertIn("TRAILING PROFIT LOCK", reason)
+
+    def test_cpg_tactical_take_profit(self):
+        obs = np.zeros(18, dtype=np.float32)
+        obs[8] = 1.0   # is_holding = True
+        obs[9] = 0.085  # unrealized gain +0.85% (exceeds default take_profit_pct = +0.80%)
+        act, triggered, reason = self.agent.check_cpg_risk_reflex(obs, HOLD)
+        self.assertEqual(act, SELL)
+        self.assertTrue(triggered)
+        self.assertIn("TARGET TAKE-PROFIT", reason)
 
     def test_select_action_with_mask(self):
         obs = np.random.uniform(-0.5, 0.5, size=18).astype(np.float32)
