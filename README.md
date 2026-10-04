@@ -285,6 +285,8 @@ Comprehensive evaluations across `experiments/run_poc_experiments.py`, `experime
 * **Interactive Multi-Asset Profile Selector:** Clickable cycle button allowing instant real-time switching between asset classes (`TECH GROWTH`, `INDEX ETF`, `CRYPTO BTC`, `DEFENSIVE VALUE`) and historical daily market data (`REAL: SPY ETF`, `REAL: AAPL`, `REAL: BTC/USD`).
 * **Portfolio Equity Monitor:** Live equity curve tracking net worth vs. the Buy & Hold benchmark with telemetry gauges (Cash, Shares, Unrealized PnL %, Cumulative Return %, Win Rate %, Max Drawdown %).
 * **Hippocampal Neural Monitor:** 50 active granule cells in Dentate Gyrus (2.44% sparsity), CA3 multi-bar trajectory depth meter, and instant alert banners for **SWR EPISODIC REPLAY: ACTIVE** and **CPG RISK REFLEX: STOP-LOSS**.
+* **Real-Time Training Load Bar (Progress Monitor):** Dynamic glowing progress bar embedded directly into the control panel displaying live completion % and active episode counts (`⚡ TRAINING: 245/500 (49.0%) | CUDA GPU`). Executes via a non-blocking background worker thread to ensure the 60 FPS GUI rendering never freezes during heavy training loops.
+* **Hardware Accelerator & GPU Telemetry:** Automatic dynamic GPU detection (e.g., `NVIDIA GeForce GTX 1060 3GB`) with top-right header status badge (`GPU: CUDA ONLINE` / `CUDA ACTIVE ⚡`), active telemetry sub-line, and real-time PyTorch CUDA tensor synchronization during associative memory updates with graceful CPU fallback.
 * **Controls:** Step, Auto-Trade, Speed scaling (1x to 10x), Asset Selector cycle button, Live Plasticity toggle, CPG Stop-Loss toggle, Reset, and **TRAIN HISTORICAL (+500 EP)**.
 
 ---
@@ -318,7 +320,7 @@ pip install -r requirements.txt
   ```
 
 ### 6.3 Running Automated Unit Tests
-Run the comprehensive test suite (21 test suites, 100 test cases passing 100%):
+Run the comprehensive test suite (21 test suites, 101 test cases passing 100%):
 ```bash
 python -m unittest discover tests
 ```

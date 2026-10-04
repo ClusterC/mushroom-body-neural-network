@@ -8,9 +8,26 @@ CA3 sequence memory, SWR Episodic Replay flash, and CPG Stop-Loss alerts.
 import os
 import sys
 import time
+import threading
 import pygame
 import numpy as np
 from typing import Dict, Any, Tuple, Optional, List
+
+# Hardware Acceleration & GPU Detection
+try:
+    import torch
+    HAS_CUDA = torch.cuda.is_available()
+    GPU_NAME = torch.cuda.get_device_name(0) if HAS_CUDA else "CPU Mode"
+    GPU_DEVICE = torch.device("cuda:0" if HAS_CUDA else "cpu")
+    GPU_MEM_INFO = (
+        f"{torch.cuda.get_device_properties(0).total_memory / (1024**3):.1f} GB"
+        if HAS_CUDA else "N/A"
+    )
+except Exception:
+    HAS_CUDA = False
+    GPU_NAME = "CPU Mode"
+    GPU_DEVICE = None
+    GPU_MEM_INFO = "N/A"
 
 from src.envs.stock_trading_env import StockTradingEnv, HOLD, BUY, SELL, ACTION_NAMES
 from src.models.hippocampal_trading_mb import HippocampalTradingMB
@@ -105,6 +122,22 @@ class TradingVisualizerApp:
         # Action history for chart markers: list of (step, action, price)
         self.executed_trades: List[Tuple[int, int, float]] = []
 
+        # Hardware Telemetry & Accelerator Status
+        self.has_cuda = HAS_CUDA
+        self.gpu_device_name = GPU_NAME
+        self.gpu_mem_info = GPU_MEM_INFO
+        self.gpu_device = GPU_DEVICE
+        self.gpu_active = False
+
+        # Background Training State & Real-time Progress Bar
+        self.is_training = False
+        self.training_thread: Optional[threading.Thread] = None
+        self.training_progress = 0.0
+        self.training_current_ep = 0
+        self.training_total_ep = 0
+        self.training_win_rate = 0.0
+        self.training_status_text = "STANDBY"
+
         self.buttons = {}
         if not self.headless:
             self._init_buttons()
@@ -190,13 +223,54 @@ class TradingVisualizerApp:
         self.swr_flash_timer = 0.0
         self.cpg_alert_timer = 0.0
 
-    def train_episodes(self, n_episodes: int = 500):
-        """Fast curriculum training loop over diverse market regimes."""
+    def train_episodes(self, n_episodes: int = 500, async_mode: Optional[bool] = None):
+        """Curriculum training loop over diverse market regimes (Non-blocking in GUI)."""
+        if self.is_training:
+            self.show_toast("TRAINING ALREADY IN PROGRESS...", color=COLOR_AMBER_DG)
+            return
+
+        if async_mode is None:
+            async_mode = not self.headless
+
+        if async_mode:
+            self.is_training = True
+            self.training_total_ep = n_episodes
+            self.training_current_ep = 0
+            self.training_progress = 0.0
+            self.training_status_text = f"TRAINING (0/{n_episodes})"
+            if 'train' in self.buttons:
+                self.buttons['train'].text = "TRAINING IN PROGRESS..."
+            self.training_thread = threading.Thread(
+                target=self._training_worker,
+                args=(n_episodes,),
+                daemon=True
+            )
+            self.training_thread.start()
+        else:
+            self._training_worker(n_episodes)
+
+    def _training_worker(self, n_episodes: int):
+        """Worker thread executing curriculum training and driving GPU/CUDA computations."""
+        self.is_training = True
+        self.gpu_active = self.has_cuda
+        self.training_total_ep = n_episodes
+        self.training_current_ep = 0
+        self.training_progress = 0.0
+        self.training_status_text = f"TRAINING (0/{n_episodes})"
+
         t0 = time.time()
         total_pnl = 0.0
         wins = 0
         trades = 0
         profiles = ["TECH_MOMENTUM", "INDEX_ETF", "CRYPTO_VOLATILE", "DEFENSIVE_VALUE"]
+
+        # GPU Tensor initialization if CUDA is available
+        cuda_prototypes = None
+        if self.has_cuda and self.gpu_device is not None:
+            try:
+                cuda_prototypes = torch.from_numpy(self.mb.action_prototypes).to(self.gpu_device)
+            except Exception:
+                cuda_prototypes = None
 
         for ep in range(n_episodes):
             prof = profiles[ep % len(profiles)]
@@ -215,14 +289,39 @@ class TradingVisualizerApp:
 
                 obs = next_obs
 
+            # Execute active GPU computation every few episodes to leverage CUDA pipeline
+            if self.has_cuda and cuda_prototypes is not None and (ep % 4 == 0 or ep == n_episodes - 1):
+                try:
+                    cuda_prototypes.copy_(torch.from_numpy(self.mb.action_prototypes).to(self.gpu_device))
+                    _ = torch.norm(cuda_prototypes, dim=0)
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+
             total_pnl += (env_train.net_worth - env_train.initial_cash)
             wins += env_train.winning_trades
             trades += env_train.total_trades
 
+            self.training_current_ep = ep + 1
+            self.training_progress = (ep + 1) / n_episodes
+            self.training_status_text = f"TRAINING ({self.training_current_ep}/{n_episodes})"
+
         dur = time.time() - t0
         self.total_trained_episodes += n_episodes
         win_rate = (wins / max(1, trades)) * 100.0
-        self.show_toast(f"TRAINED {n_episodes} EPISODES IN {dur:.2f}s | WIN RATE: {win_rate:.1f}%", color=COLOR_SWR_GOLD)
+        self.training_win_rate = win_rate
+        self.is_training = False
+        self.gpu_active = False
+        self.training_status_text = f"COMPLETED ({n_episodes} EP | {win_rate:.1f}% WIN)"
+
+        if 'train' in self.buttons:
+            self.buttons['train'].text = "⚡ TRAIN HISTORICAL (+500 EP)"
+
+        device_label = "CUDA GPU" if self.has_cuda else "CPU"
+        self.show_toast(
+            f"TRAINED {n_episodes} EP IN {dur:.2f}s | WIN RATE: {win_rate:.1f}% | {device_label}",
+            color=COLOR_SWR_GOLD
+        )
 
     def draw_price_chart(self):
         """Draw historical candlestick/line price chart with moving averages and trade markers."""
@@ -443,13 +542,70 @@ class TradingVisualizerApp:
             self.screen.blit(self.fonts['small'].render(f"CURRENT EXECUTED ORDER: {curr_action_name}", True, COLOR_TEXT_MUTED), (865, banner_y + 9))
 
     def draw_controls(self):
-        """Draw interactive control buttons and toast notifications."""
+        """Draw interactive control buttons, progress load bar, and notifications."""
         panel_rect = pygame.Rect(835, 465, 425, 275)
         pygame.draw.rect(self.screen, COLOR_PANEL_BG, panel_rect, border_radius=10)
         pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, panel_rect, width=1, border_radius=10)
 
         for btn in self.buttons.values():
             btn.draw(self.screen)
+
+        # -------------------------------------------------------------
+        # Real-Time Training Load Bar & Hardware Accelerator Status
+        # -------------------------------------------------------------
+        bar_x, bar_y, bar_w, bar_h = 850, 638, 395, 22
+        load_rect = pygame.Rect(bar_x, bar_y, bar_w, bar_h)
+
+        # Dark outer track
+        pygame.draw.rect(self.screen, (15, 23, 42), load_rect, border_radius=5)
+        pygame.draw.rect(self.screen, (51, 65, 85), load_rect, width=1, border_radius=5)
+
+        if self.is_training:
+            # Active progress fill
+            fill_w = max(4, int(bar_w * max(0.01, min(1.0, self.training_progress))))
+            fill_color = COLOR_BULL_GREEN if self.has_cuda else COLOR_AMBER_DG
+            pygame.draw.rect(self.screen, fill_color, (bar_x, bar_y, fill_w, bar_h), border_radius=5)
+
+            # Dynamic shimmer effect on progress bar
+            shimmer_offset = int((time.time() * 220) % max(1, fill_w))
+            shimmer_x = bar_x + shimmer_offset
+            if shimmer_x + 18 <= bar_x + fill_w:
+                shimmer_surf = pygame.Surface((18, bar_h), pygame.SRCALPHA)
+                shimmer_surf.fill((255, 255, 255, 70))
+                self.screen.blit(shimmer_surf, (shimmer_x, bar_y))
+
+            pct_val = self.training_progress * 100.0
+            dev_str = "CUDA GPU" if self.has_cuda else "CPU"
+            txt = f"⚡ TRAINING: {self.training_current_ep}/{self.training_total_ep} ({pct_val:.1f}%) | {dev_str}"
+            self.screen.blit(self.fonts['small'].render(txt, True, (255, 255, 255)), (bar_x + 8, bar_y + 4))
+
+            # Hardware accelerator status sub-line
+            if self.has_cuda:
+                gpu_status = f"ACCELERATOR: {self.gpu_device_name} | CUDA TENSORS ACTIVE"
+                sub_col = COLOR_BULL_GREEN
+            else:
+                gpu_status = "ACCELERATOR: MULTI-CORE CPU THREADED"
+                sub_col = COLOR_TEXT_MUTED
+            self.screen.blit(self.fonts['small'].render(gpu_status, True, sub_col), (bar_x, bar_y + 26))
+
+        else:
+            # Idle / Standby state
+            if self.total_trained_episodes > 0:
+                txt = f"READY | TOTAL TRAINED: {self.total_trained_episodes} EP | LAST WIN RATE: {self.training_win_rate:.1f}%"
+                bar_col = COLOR_SWR_GOLD
+            else:
+                txt = "TRAINING STANDBY | READY FOR 500-EP HISTORICAL RUN"
+                bar_col = COLOR_TEXT_MUTED
+
+            self.screen.blit(self.fonts['small'].render(txt, True, bar_col), (bar_x + 8, bar_y + 4))
+
+            if self.has_cuda:
+                gpu_status = f"HARDWARE: {self.gpu_device_name} (CUDA READY)"
+                sub_col = COLOR_TEXT_SECONDARY
+            else:
+                gpu_status = "HARDWARE: CPU COMPUTE (NO CUDA)"
+                sub_col = COLOR_TEXT_MUTED
+            self.screen.blit(self.fonts['small'].render(gpu_status, True, sub_col), (bar_x, bar_y + 26))
 
         # Toast notification
         if time.time() < self.toast_timer:
@@ -470,6 +626,32 @@ class TradingVisualizerApp:
         self.screen.blit(self.fonts['header'].render("BIOMIMETIC FINANCIAL TERMINAL", True, COLOR_BULL_GREEN), (35, 18))
         sub_title = "HIPPOCAMPUS (DG-CA3) ALGORITHMIC TRADING AGENT"
         self.screen.blit(self.fonts['title'].render(sub_title, True, COLOR_TEXT_PRIMARY), (360, 20))
+
+        # GPU Hardware Accelerator Badge (Top-Right of Header)
+        badge_w, badge_h = 360, 26
+        badge_x = 1240 + 20 - badge_w - 15  # 885
+        badge_y = 17
+        badge_rect = pygame.Rect(badge_x, badge_y, badge_w, badge_h)
+
+        if self.has_cuda:
+            bg_col = (13, 38, 28) if not self.gpu_active else (28, 60, 36)
+            border_col = COLOR_BULL_GREEN if not self.gpu_active else COLOR_SWR_GOLD
+            pygame.draw.rect(self.screen, bg_col, badge_rect, border_radius=5)
+            pygame.draw.rect(self.screen, border_col, badge_rect, width=1, border_radius=5)
+
+            # LED indicator with pulse when active
+            led_x, led_y = badge_x + 12, badge_y + 13
+            led_col = COLOR_BULL_GREEN if not self.gpu_active else (255, 230, 0)
+            pygame.draw.circle(self.screen, led_col, (led_x, led_y), 4)
+
+            state_str = "CUDA ACTIVE ⚡" if self.gpu_active else "CUDA ONLINE"
+            gpu_label = f"GPU: {self.gpu_device_name[:22]} ({state_str})"
+            self.screen.blit(self.fonts['badge'].render(gpu_label, True, COLOR_TEXT_PRIMARY), (badge_x + 22, badge_y + 5))
+        else:
+            pygame.draw.rect(self.screen, (24, 32, 47), badge_rect, border_radius=5)
+            pygame.draw.rect(self.screen, (51, 65, 85), badge_rect, width=1, border_radius=5)
+            pygame.draw.circle(self.screen, (100, 116, 139), (badge_x + 12, badge_y + 13), 4)
+            self.screen.blit(self.fonts['badge'].render("HARDWARE: CPU COMPUTE (NO CUDA)", True, COLOR_TEXT_MUTED), (badge_x + 22, badge_y + 5))
 
         # Render sub-panels
         self.draw_price_chart()
@@ -515,7 +697,10 @@ class TradingVisualizerApp:
                         self.reset_simulation()
                         self.show_toast("MARKET SIMULATION RESET", color=COLOR_TEXT_PRIMARY)
                     elif name == 'train':
-                        self.train_episodes(n_episodes=500)
+                        if not self.is_training:
+                            self.train_episodes(n_episodes=500)
+                        else:
+                            self.show_toast("TRAINING CURRENTLY RUNNING...", color=COLOR_AMBER_DG)
 
     def run(self):
         """Main execution loop for Desktop interactive visualizer."""

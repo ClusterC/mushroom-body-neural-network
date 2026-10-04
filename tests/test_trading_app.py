@@ -37,6 +37,22 @@ class TestTradingVisualizerApp(unittest.TestCase):
     def test_training_routine(self):
         self.app.train_episodes(n_episodes=2)
         self.assertEqual(self.app.total_trained_episodes, 2)
+        self.assertEqual(self.app.training_current_ep, 2)
+        self.assertAlmostEqual(self.app.training_progress, 1.0)
+        self.assertFalse(self.app.is_training)
+
+    def test_hardware_telemetry(self):
+        self.assertIsInstance(self.app.has_cuda, bool)
+        self.assertIsInstance(self.app.gpu_device_name, str)
+        self.assertGreater(len(self.app.gpu_device_name), 0)
+        self.assertFalse(self.app.gpu_active)
+
+    def test_async_training_thread(self):
+        self.app.train_episodes(n_episodes=2, async_mode=True)
+        self.assertIsNotNone(self.app.training_thread)
+        self.app.training_thread.join(timeout=5.0)
+        self.assertFalse(self.app.is_training)
+        self.assertEqual(self.app.total_trained_episodes, 2)
 
     def test_asset_profile_switching(self):
         initial_idx = self.app.asset_idx
