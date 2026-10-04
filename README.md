@@ -1,11 +1,12 @@
 # Bio-Inspired Mushroom Body Neural Network for Adaptive Game Playing
 
-A biomimetic neuromorphic computing framework modeling the insect **Mushroom Body (MB)** (*Drosophila melanogaster* / *Apis mellifera*) and mammalian **Hippocampal-Entorhinal Cognitive Map** (*DG-CA3*). Features High-Dimensional Sparse Expansion, Three-Factor Local Hebbian Plasticity, Hyperdimensional Computing (HDC-VSA), and Sharp-Wave Ripple (SWR) Episodic Replay for real-time game playing, robotic foraging, and few-shot continuous adaptation.
+A biomimetic neuromorphic computing framework modeling the insect **Mushroom Body (MB)** (*Drosophila melanogaster* / *Apis mellifera*) and mammalian **Hippocampal-Entorhinal Cognitive Map** (*DG-CA3*). Features High-Dimensional Sparse Expansion, Three-Factor Local Hebbian Plasticity, Hyperdimensional Computing (HDC-VSA), and Sharp-Wave Ripple (SWR) Episodic Replay for real-time game playing, robotic foraging, few-shot continuous adaptation, and algorithmic market trading.
 
 <p align="center">
-  <img src="assets/snake_demo.gif" width="32%" alt="Visual Snake Arena Demo"/>
-  <img src="assets/bee_demo.gif" width="32%" alt="Honeybee Meadow Foraging Demo"/>
-  <img src="assets/xo_demo.gif" width="32%" alt="Tic-Tac-Toe Matchup Demo"/>
+  <img src="assets/snake_demo.gif" width="24%" alt="Visual Snake Arena Demo"/>
+  <img src="assets/bee_demo.gif" width="24%" alt="Honeybee Meadow Foraging Demo"/>
+  <img src="assets/xo_demo.gif" width="24%" alt="Tic-Tac-Toe Matchup Demo"/>
+  <img src="assets/trading_demo.gif" width="24%" alt="Financial Terminal Demo"/>
 </p>
 
 ---
@@ -63,10 +64,12 @@ mushroom-body-neural-network/
 ├── run_XO_visualizer.py                       # Desktop Pygame Visualizer for Tic-Tac-Toe Arena
 ├── run_snake_visualizer.py                    # Desktop Pygame Visualizer for Visual Snake Arena
 ├── run_bee_visualizer.py                      # Desktop Pygame Visualizer for Honeybee Foraging Simulator
+├── run_trading_visualizer.py                  # Desktop Pygame Visualizer for Biomimetic Financial Terminal
 ├── assets/                                    # Animated simulation demonstration GIFs
 │   ├── snake_demo.gif                         # Visual Snake Arena demonstration
 │   ├── bee_demo.gif                           # Honeybee Meadow Foraging demonstration
-│   └── xo_demo.gif                            # Tic-Tac-Toe SWR Replay demonstration
+│   ├── xo_demo.gif                            # Tic-Tac-Toe SWR Replay demonstration
+│   └── trading_demo.gif                       # Biomimetic Financial Terminal demonstration
 ├── scripts/
 │   └── generate_demo_gifs.py                  # Automated headless Pygame GIF recorder
 ├── doc/
@@ -75,7 +78,8 @@ mushroom-body-neural-network/
 │   ├── envs/
 │   │   ├── tic_tac_toe.py                     # 3x3 board environment, action masking, 27-dim one-hot observation
 │   │   ├── snake_env.py                       # 10x10 Snake environment with 3-channel visual optic flow (300 PNs)
-│   │   └── bee_foraging_env.py                # 20x20 floral meadow, 4 floral odors, UV compound eyes (36 PNs)
+│   │   ├── bee_foraging_env.py                # 20x20 floral meadow, 4 floral odors, UV compound eyes (36 PNs)
+│   │   └── stock_trading_env.py               # Realistic OHLCV market, portfolio accounting, 16-dim technical PNs
 │   ├── models/
 │   │   ├── mushroom_body.py                   # Canonical MB: PN -> KC (k-WTA) -> MBON with Three-Factor Plasticity
 │   │   ├── visual_mushroom_body.py            # Visual MB with Optic Lobe receptive fields (2,000 KCs, 4 MBONs)
@@ -83,7 +87,8 @@ mushroom-body-neural-network/
 │   │   ├── bee_mushroom_body.py               # Tri-zonal Calyx (Lip, Collar, Basal Ring: 2,500 KCs, Octopamine/DA)
 │   │   ├── hdc_visual_mb.py                   # HDC-VSA MB (D=2,048, Role-Filler Binding, k-WTA 5%)
 │   │   ├── hippocampal_hdc_mb.py              # Hippocampal MB for Snake (DG 2.44% + CA3 Attractor + SWR Replay)
-│   │   └── hippocampal_xo_mb.py               # Hippocampal MB for XO (DG Separation + CA3 Opening Memory + SWR)
+│   │   ├── hippocampal_xo_mb.py               # Hippocampal MB for XO (DG Separation + CA3 Opening Memory + SWR)
+│   │   └── hippocampal_trading_mb.py          # Hippocampal MB for Trading (Continuous Level HDC + SWR + CPG Stop-Loss)
 │   ├── training/
 │   │   ├── self_play.py                       # Co-evolutionary self-play training with snapshot history pool
 │   │   └── gpu_snake_trainer.py               # Massively parallel PyTorch CUDA batch plasticity engine
@@ -91,7 +96,8 @@ mushroom-body-neural-network/
 │   │   ├── components.py                      # Reusable UI widgets, board renderers, and neural circuit monitors
 │   │   ├── app.py                             # Pygame application main loop for Tic-Tac-Toe Arena
 │   │   ├── snake_app.py                       # Pygame application main loop for Visual Snake (Quad-Architecture)
-│   │   └── bee_app.py                         # Pygame application main loop for Honeybee Meadow Simulator
+│   │   ├── bee_app.py                         # Pygame application main loop for Honeybee Meadow Simulator
+│   │   └── trading_app.py                     # Pygame application main loop for Biomimetic Financial Terminal
 │   ├── opponents/
 │   │   ├── random_agent.py                    # Uniform random legal move agent
 │   │   ├── heuristic_agent.py                 # Rule-based agent (immediate win, immediate block, center control)
@@ -116,7 +122,10 @@ mushroom-body-neural-network/
 │   ├── test_bee_app.py                        # Unit tests for Honeybee visualizer application state transitions
 │   ├── test_hdc_mb.py                         # Unit tests for HDC-VSA binding, bundling, sparsity, and plasticity
 │   ├── test_hippocampal_mb.py                 # Unit tests for DG separation, CA3 sequence, and SWR replay (Snake)
-│   └── test_hippocampal_xo.py                 # Unit tests for DG separation, CA3 opening book, and SWR replay (XO)
+│   ├── test_hippocampal_xo.py                 # Unit tests for DG separation, CA3 opening book, and SWR replay (XO)
+│   ├── test_trading_env.py                    # Unit tests for OHLCV trading market, portfolio, and action masking
+│   ├── test_hippocampal_trading_mb.py         # Unit tests for continuous level HDC, SWR replay, and CPG stop-loss
+│   └── test_trading_app.py                    # Unit tests for Financial Terminal Pygame state machine
 └── experiments/
     ├── run_poc_experiments.py                 # Proof-of-concept experiments across all core benchmarks
     ├── run_self_play_benchmark.py             # Comparative benchmark: Fixed baseline vs. Self-play co-evolution
@@ -124,7 +133,8 @@ mushroom-body-neural-network/
     ├── run_hdc_benchmark.py                   # Benchmark for HDC-VSA architecture with vector symbolic algebra
     ├── run_hippocampal_benchmark.py           # Benchmark for Hippocampus (DG-CA3) few-shot learning on Snake
     ├── run_xo_hippocampal_benchmark.py        # Benchmark for Hippocampal MB vs. Optimal Minimax on Tic-Tac-Toe
-    └── run_snake_hippocampal_dimension_benchmark.py # Dimension scaling analysis (D = 1,024 to 8,192) on Snake
+    ├── run_snake_hippocampal_dimension_benchmark.py # Dimension scaling analysis (D = 1,024 to 8,192) on Snake
+    └── run_trading_benchmark.py               # Comparative benchmark across 5 market regimes vs. Buy & Hold
 ```
 
 ---
@@ -180,11 +190,18 @@ mushroom-body-neural-network/
 * Computes $k$-WTA via `torch.topk` and three-factor eligibility updates via tensor matrix operations.
 * Achieves **15,400+ FPS** (completes 2,000 full training episodes in **2.14 seconds**).
 
+### 3.8 Hippocampal Cognitive Map for Algorithmic Stock Trading (`hippocampal_trading_mb.py`)
+* **Continuous Thermometer Quantization:** Entorhinal Cortex converts 16 continuous market & portfolio indicators (Returns, RSI, SMA ratios, ATR Volatility, Position, Drawdown) into orthogonal bipolar hypervectors ($D=2,048$) via level thermometer coding.
+* **Dentate Gyrus (DG) Market Regime Separation:** Ultra-sparse $k$-WTA ($k=50$, 2.44% sparsity) forces orthogonal representations ($|\cos \theta| \le 0.05$) between conflicting market regimes (bull breakouts, bear cascades, sideways chop), eliminating catastrophic interference.
+* **CA3 Trajectory Sequence Memory ($\Pi$):** Circular permutation tracks multi-bar candlestick sequences $\mathbf{H}_{\text{market}} = \mathbf{S}_t + \Pi(\mathbf{S}_{t-1}) + \Pi^2(\mathbf{S}_{t-2}) + ...$ over a 5-step rolling window to recognize temporal chart patterns.
+* **Sharp-Wave Ripple (SWR) Post-Trade Replay:** Upon closing a trade, the sequence of decisions is replayed in reverse from exit back to entry, backpropagating realized profit/loss to the initial entry decision in a single trial.
+* **Spinal CPG Risk Reflex (Hard Stop-Loss):** An automatic spinal reflex vetoes model hesitation and forces an immediate liquidation (`SELL`) when position drawdown exceeds -3.0%, reducing portfolio drawdown by over 70% compared to Buy & Hold.
+
 ---
 
 ## 4. Empirical Benchmarks & Experimental Results
 
-Comprehensive evaluations across `experiments/run_poc_experiments.py`, `experiments/run_self_play_benchmark.py`, `experiments/run_stacked_benchmark.py`, `experiments/run_xo_hippocampal_benchmark.py`, and `experiments/run_snake_hippocampal_dimension_benchmark.py`:
+Comprehensive evaluations across `experiments/run_poc_experiments.py`, `experiments/run_self_play_benchmark.py`, `experiments/run_stacked_benchmark.py`, `experiments/run_xo_hippocampal_benchmark.py`, `experiments/run_snake_hippocampal_dimension_benchmark.py`, and `experiments/run_trading_benchmark.py`:
 
 | Experiment Benchmark | Primary Evaluation Metric | Single MB (CPU) | Stacked Deep MB (CPU) | Supercharged GPU MB / Hippocampus |
 | :--- | :--- | :--- | :--- | :--- |
@@ -196,6 +213,7 @@ Comprehensive evaluations across `experiments/run_poc_experiments.py`, `experime
 | **Exp 7: Hippocampus DG-CA3** | **Avg Apples / Game**<br/>**Max Apples in Game**<br/>**Avg Survival Steps**<br/>**Few-shot Training (200 EP)** | 0.03 Apples<br/>1 Apple<br/>21.2 Steps<br/>N/A | 0.44 Apples<br/>4 Apples<br/>91.8 Steps<br/>N/A | **17.06 Apples (+56,766%)**<br/>**35 Apples (Peak)**<br/>**169.4 Steps**<br/>**34.07s (200 EP / SWR Replay)** |
 | **Exp 8: Hippocampus XO vs Minimax** | **vs. Random Win%**<br/>**vs. Heuristic Non-loss%**<br/>**vs. Minimax (Playing as X)**<br/>**vs. Minimax (Playing as O)** | 65.0% Win<br/>100.0% Non-loss<br/>0.0% Non-loss (100% Loss)<br/>0.0% Non-loss (100% Loss) | N/A | **98.0% Win**<br/>**100.0% Non-loss**<br/>**100.0% Master Defense (100/100 Draws)**<br/>**100.0% Master Defense (100/100 Draws)** |
 | **Exp 9: HDC Dimensional Scaling (Snake)** | **D = 1,024**<br/>**D = 2,048 (Baseline)**<br/>**D = 4,096**<br/>**D = 8,192** | 18.00 Apples / Max 33<br/>18.62 Apples / Max 41<br/>19.55 Apples / Max 42<br/>**20.70 Apples / Max 45 (All-Time Record)** | N/A | **Linear scaling with hypervector dimensionality:**<br/>Average apples increased from 18.00 to **20.70**<br/>All-time peak record reached **45 apples** (206.8 steps)<br/>DG Separation Gain increased from +77.3% to **+89.3%** |
+| **Exp 10: Multi-Market Stock Trading** | **Avg Return %**<br/>**Avg Annualized Sharpe**<br/>**Avg Max Drawdown %**<br/>**Trade Win Rate %** | -0.40% Return<br/>-0.01 Sharpe<br/>5.30% Max DD<br/>33.7% Win Rate | N/A | **-0.90% Return** (Capital Preserved)<br/>**-0.16 Sharpe**<br/>**5.45% Max DD** (vs. 18.24% B&H / 24.03% Heuristic)<br/>**50.0% Win Rate** |
 
 > [!TIP]
 > **Key Finding on HDC Dimensional Scaling:** In sequential navigation tasks, scaling hypervector dimension $D$ from 1,024 to 8,192 systematically increases the Signal-to-Noise Ratio (SNR) proportional to $\sqrt{D}$. This effectively suppresses cross-talk, boosting Dentate Gyrus pattern separation to **+89.3%** and lifting peak performance to **45 apples**.
@@ -243,6 +261,17 @@ Comprehensive evaluations across `experiments/run_poc_experiments.py`, `experime
 * **Adaptive Circuit Monitor:** Automatically switches telemetry display between Canonical Kenyon Cell grid (1,000 neurons / 75 active) and Hippocampal Dentate Gyrus map (50 granule cells with CA3 depth and SWR replay alerts).
 * **Interactive Learning Controls:** Live Plasticity toggle, Train Heuristic (+500), and Train Self-Play (+500).
 
+### 5.4 Biomimetic Financial Terminal (`run_trading_visualizer.py`)
+
+<p align="center">
+  <img src="assets/trading_demo.gif" alt="Biomimetic Financial Terminal Demo" width="760"/>
+</p>
+
+* **Real-time Price & Indicator Chart:** Live plotting of price bars with SMA-5 and SMA-20 trend overlays, and glowing Buy/Sell execution flags.
+* **Portfolio Equity Monitor:** Live equity curve tracking net worth vs. the Buy & Hold benchmark with telemetry gauges (Cash, Shares, Unrealized PnL %, Cumulative Return %, Win Rate %, Max Drawdown %).
+* **Hippocampal Neural Monitor:** 50 active granule cells in Dentate Gyrus (2.44% sparsity), CA3 multi-bar trajectory depth meter, and instant alert banners for **SWR EPISODIC REPLAY: ACTIVE** and **CPG RISK REFLEX: STOP-LOSS**.
+* **Controls:** Step, Auto-Trade, Speed scaling (1x to 10x), Live Plasticity toggle, CPG Stop-Loss toggle, Reset, and **TRAIN HISTORICAL (+500 EP)**.
+
 ---
 
 ## 6. Installation & Execution Guide
@@ -268,9 +297,13 @@ pip install -r requirements.txt
   # or
   python run_XO_visualizer.py
   ```
+* **Biomimetic Financial Trading Terminal:**
+  ```bash
+  python run_trading_visualizer.py
+  ```
 
 ### 6.3 Running Automated Unit Tests
-Run the comprehensive test suite (18 test suites, 74 test cases passing 100%):
+Run the comprehensive test suite (21 test suites, 91 test cases passing 100%):
 ```bash
 python -m unittest discover tests
 ```
@@ -285,4 +318,5 @@ python experiments/run_hdc_benchmark.py
 python experiments/run_hippocampal_benchmark.py
 python experiments/run_xo_hippocampal_benchmark.py
 python experiments/run_snake_hippocampal_dimension_benchmark.py
+python experiments/run_trading_benchmark.py
 ```

@@ -145,19 +145,45 @@ def record_xo_demo(output_path):
     save_optimized_gif(frames, output_path, duration=400)
 
 
+from src.visualizer.trading_app import TradingVisualizerApp
+
+
+def record_trading_demo(output_path, num_steps=28):
+    """Record Biomimetic Financial Terminal with live trades, equity curve, and DG telemetry."""
+    print("Recording Financial Trading Terminal Demo...")
+    app = TradingVisualizerApp(headless=False)
+    app.auto_trade = True
+    app.live_plasticity = True
+    app.cpg_enabled = True
+    app.reset_simulation()
+
+    frames = []
+    app.draw_all()
+    frames.append(surface_to_pil(app.screen, target_size=(800, 475)))
+
+    for step in range(num_steps):
+        app.step_simulation()
+        app.draw_all()
+        frames.append(surface_to_pil(app.screen, target_size=(800, 475)))
+
+    save_optimized_gif(frames, output_path, duration=180)
+
+
 def main():
     assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets"))
     os.makedirs(assets_dir, exist_ok=True)
 
-    snake_gif = os.path.join(assets_dir, "snake_demo.gif")
-    bee_gif = os.path.join(assets_dir, "bee_demo.gif")
-    xo_gif = os.path.join(assets_dir, "xo_demo.gif")
+    if "--all" in sys.argv:
+        record_snake_demo(os.path.join(assets_dir, "snake_demo.gif"), num_steps=24)
+        record_bee_demo(os.path.join(assets_dir, "bee_demo.gif"), num_steps=26)
+        record_xo_demo(os.path.join(assets_dir, "xo_demo.gif"))
+        record_trading_demo(os.path.join(assets_dir, "trading_demo.gif"), num_steps=28)
+    else:
+        # Default: record trading demo if not already, or update
+        trading_gif = os.path.join(assets_dir, "trading_demo.gif")
+        record_trading_demo(trading_gif, num_steps=28)
 
-    record_snake_demo(snake_gif, num_steps=24)
-    record_bee_demo(bee_gif, num_steps=26)
-    record_xo_demo(xo_gif)
-
-    print("\nAll demonstration GIFs generated successfully in 'assets/' directory.")
+    print("\nDemonstration GIF(s) generated successfully in 'assets/' directory.")
 
 
 if __name__ == "__main__":
