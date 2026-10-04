@@ -169,11 +169,11 @@ class TradingVisualizerApp:
 
         # Handle trade close / SWR replay
         if info.get("trade_event") == "SELL":
-            self.mb.trigger_swr_episodic_replay(reward)
+            self.mb.trigger_swr_episodic_replay(reward, trade_return=self.env.last_trade_return)
             self.swr_flash_timer = time.time() + 1.2
             ret_pct = self.env.last_trade_return * 100.0
             color = COLOR_BULL_GREEN if ret_pct >= 0 else COLOR_BEAR_RED
-            self.show_toast(f"TRADE CLOSED: {ret_pct:+.2f}% (SWR REPLAY APPLIED)", color=color)
+            self.show_toast(f"TRADE CLOSED: {ret_pct:+.2f}% (PRIORITIZED SWR REPLAY)", color=color)
 
         if self.mb.last_cpg_triggered:
             self.cpg_alert_timer = time.time() + 1.5
@@ -191,14 +191,16 @@ class TradingVisualizerApp:
         self.cpg_alert_timer = 0.0
 
     def train_episodes(self, n_episodes: int = 500):
-        """Fast training loop over multiple market episodes."""
+        """Fast curriculum training loop over diverse market regimes."""
         t0 = time.time()
         total_pnl = 0.0
         wins = 0
         trades = 0
+        profiles = ["TECH_MOMENTUM", "INDEX_ETF", "CRYPTO_VOLATILE", "DEFENSIVE_VALUE"]
 
         for ep in range(n_episodes):
-            env_train = StockTradingEnv(initial_cash=10000.0, max_steps=252, seed=1000 + ep)
+            prof = profiles[ep % len(profiles)]
+            env_train = StockTradingEnv(initial_cash=10000.0, max_steps=252, asset_profile=prof, seed=1000 + ep)
             obs = env_train.reset()
             self.mb.reset_traces()
 
@@ -209,7 +211,7 @@ class TradingVisualizerApp:
                 self.mb.update_plasticity(rew)
 
                 if info.get("trade_event") == "SELL":
-                    self.mb.trigger_swr_episodic_replay(rew)
+                    self.mb.trigger_swr_episodic_replay(rew, trade_return=env_train.last_trade_return)
 
                 obs = next_obs
 

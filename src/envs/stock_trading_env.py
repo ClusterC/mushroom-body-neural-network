@@ -311,6 +311,16 @@ class StockTradingEnv:
         momentum_regime = 1.0 if ret_5 >= 0 else -1.0
         rsi_signal = 1.0 if rsi > 0.70 else (-1.0 if rsi < 0.30 else 0.0)
 
+        # 8. Advanced Institutional Features: 20-period VWAP & Donchian Channel
+        sum_vol = np.sum(self.volumes[idx - 19: idx + 1])
+        vwap = np.sum(self.prices[idx - 19: idx + 1] * self.volumes[idx - 19: idx + 1]) / max(1.0, sum_vol)
+        vwap_ratio = (close / max(1e-5, vwap)) - 1.0
+
+        h_20 = np.max(self.highs[idx - 19: idx + 1])
+        l_20 = np.min(self.lows[idx - 19: idx + 1])
+        channel_pos = (close - l_20) / max(1e-5, h_20 - l_20)
+        channel_norm = channel_pos * 2.0 - 1.0
+
         obs = np.array([
             np.clip(ret_1 * 20.0, -2.0, 2.0),
             np.clip(ret_5 * 10.0, -2.0, 2.0),
@@ -327,7 +337,9 @@ class StockTradingEnv:
             trend_regime,
             momentum_regime,
             rsi_signal,
-            np.clip(cum_return, -1.0, 2.0)
+            np.clip(cum_return, -1.0, 2.0),
+            np.clip(vwap_ratio * 15.0, -2.0, 2.0),
+            np.clip(channel_norm, -1.0, 1.0)
         ], dtype=np.float32)
 
         return obs
@@ -353,10 +365,18 @@ class StockTradingEnv:
         sma_20 = np.mean(self.prices[max(0, self.current_step - 19): self.current_step + 1])
 
         if action == BUY and mask[BUY]:
-            # Execute Long Buy with slippage and commission fee
+            # Execute Long Buy with Dynamic Position Sizing (85% to 100% allocation based on signal conviction)
+            h_20 = np.max(self.highs[max(0, self.current_step - 19): self.current_step + 1])
+            l_20 = np.min(self.lows[max(0, self.current_step - 19): self.current_step + 1])
+            channel_pos = (curr_price - l_20) / max(1e-5, h_20 - l_20)
+
+            # Conviction allocation: 100% if in clear momentum breakout, 85% otherwise (preserving liquidity buffer)
+            alloc_factor = 1.0 if (curr_price >= sma_20 and channel_pos >= 0.6) else 0.85
+            available_cash = self.cash * alloc_factor
+
             exec_price = curr_price * (1.0 + self.slippage_pct)
             fee_factor = 1.0 + self.fee_pct
-            shares_to_buy = int(self.cash / (exec_price * fee_factor))
+            shares_to_buy = int(available_cash / (exec_price * fee_factor))
             if shares_to_buy > 0:
                 cost = shares_to_buy * exec_price
                 fee = cost * self.fee_pct
@@ -367,11 +387,13 @@ class StockTradingEnv:
                 self.inaction_bars = 0
                 trade_event = "BUY"
                 # Small execution penalty to prevent churn
-                reward -= (self.fee_pct * 5.0)
+                reward -= (self.fee_pct * 4.0)
 
-                # Active Execution Incentive: reward initiating trades aligned with trend or oversold bounce
+                # Active Execution Incentive: reward initiating trades aligned with trend or channel breakout
                 if curr_price >= sma_20:
-                    reward += 0.04
+                    reward += 0.05
+                if channel_pos > 0.80:
+                    reward += 0.04  # Channel breakout momentum bonus
                 elif self.current_step > 14:
                     diffs = np.diff(self.prices[self.current_step - 14: self.current_step + 1])
                     if np.mean(np.maximum(diffs, 0.0)) < np.mean(np.abs(np.minimum(diffs, 0.0))):
@@ -395,12 +417,20 @@ class StockTradingEnv:
 
             if trade_pnl > 0:
                 self.winning_trades += 1
-                # Scaled reward for profitable trades
-                reward += min(2.5, trade_return * 15.0 + 0.5)
+                # Super-linear profit multiplier: rewarding high R-multiples & letting profits run
+                mult = 1.0 + (trade_return * 10.0) if trade_return > 0.02 else 1.0
+                profit_reward = min(4.5, (trade_return * 20.0) * mult + 0.6)
+                # Holding duration conviction bonus: rewarded for holding a winning trend
+                if self.position_bars >= 4:
+                    profit_reward += 0.25
+                reward += profit_reward
             else:
                 self.losing_trades += 1
-                # Scaled penalty for loss
-                reward += max(-3.0, trade_return * 15.0 - 0.5)
+                # Quick-stop discipline mitigation: cutting losses fast (<3 bars) receives mild penalty
+                if self.position_bars <= 3:
+                    reward += max(-1.0, trade_return * 8.0 - 0.2)
+                else:
+                    reward += max(-3.5, trade_return * 16.0 - 0.6)
 
             self.trade_history.append({
                 "step": self.current_step,
@@ -424,6 +454,9 @@ class StockTradingEnv:
                 # Unrealized mark-to-market incremental reward
                 step_ret = (curr_price - self.prices[self.current_step - 1]) / self.prices[self.current_step - 1]
                 reward += np.clip(step_ret * 3.0, -0.2, 0.2)
+                # Trend-running encouragement bonus: reward holding profitable trades
+                if curr_price > self.entry_price * 1.02:
+                    reward += 0.02
             else:
                 self.inaction_bars += 1
 

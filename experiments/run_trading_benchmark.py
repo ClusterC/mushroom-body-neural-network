@@ -124,8 +124,8 @@ def evaluate_heuristic_agent(env: StockTradingEnv) -> dict:
 
 def evaluate_canonical_mb(env: StockTradingEnv, episodes_train: int = 100) -> dict:
     """Evaluate Canonical Mushroom Body (1,000 KC)."""
-    # 16 sensory inputs -> 1000 KCs -> 3 MBON actions
-    mb = MushroomBodyNet(num_pn=16, num_kc=1000, num_mbon=3, k_active=75, seed=42)
+    # 18 sensory inputs -> 1000 KCs -> 3 MBON actions
+    mb = MushroomBodyNet(num_pn=18, num_kc=1000, num_mbon=3, k_active=75, seed=42)
 
     # Pre-train
     for ep in range(episodes_train):
@@ -202,7 +202,7 @@ def evaluate_hippocampal_mb(env: StockTradingEnv, episodes_train: int = 100) -> 
             obs, rew, done, info = env_train.step(act)
             agent.update_plasticity(rew)
             if info.get("trade_event") == "SELL":
-                agent.trigger_swr_episodic_replay(rew)
+                agent.trigger_swr_episodic_replay(rew, trade_return=env_train.last_trade_return)
 
     # Test
     obs = env.reset()
@@ -212,7 +212,7 @@ def evaluate_hippocampal_mb(env: StockTradingEnv, episodes_train: int = 100) -> 
         act, _, _, _ = agent.select_action(obs, mask, training=False)
         obs, rew, done, info = env.step(act)
         if info.get("trade_event") == "SELL":
-            agent.trigger_swr_episodic_replay(rew)
+            agent.trigger_swr_episodic_replay(rew, trade_return=env.last_trade_return)
 
     ret = ((env.net_worth - env.initial_cash) / env.initial_cash) * 100.0
     p_hist = np.array(env.portfolio_history)

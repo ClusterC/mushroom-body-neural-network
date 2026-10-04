@@ -20,7 +20,7 @@ class TestStockTradingEnv(unittest.TestCase):
         self.assertFalse(self.env.done)
 
         obs = self.env.get_observation()
-        self.assertEqual(obs.shape, (16,))
+        self.assertEqual(obs.shape, (18,))
         self.assertTrue(np.all(np.isfinite(obs)))
 
     def test_action_masking_initial(self):
@@ -76,7 +76,7 @@ class TestStockTradingEnv(unittest.TestCase):
         self.assertEqual(self.env.shares, 0)
         self.assertEqual(self.env.total_trades, 0)
         self.assertFalse(self.env.done)
-        self.assertEqual(obs.shape, (16,))
+        self.assertEqual(obs.shape, (18,))
 
     def test_episode_termination(self):
         while not self.env.done:
@@ -89,7 +89,7 @@ class TestStockTradingEnv(unittest.TestCase):
         for prof in profiles:
             env = StockTradingEnv(initial_cash=10000.0, max_steps=40, asset_profile=prof, seed=42)
             obs = env.reset()
-            self.assertEqual(obs.shape, (16,))
+            self.assertEqual(obs.shape, (18,))
             self.assertTrue(np.all(np.isfinite(obs)))
             self.assertGreater(len(env.prices), 40)
             self.assertTrue(np.all(env.prices > 0))
@@ -107,7 +107,7 @@ class TestStockTradingEnv(unittest.TestCase):
         if os.path.exists(csv_path):
             env = StockTradingEnv(initial_cash=10000.0, csv_path=csv_path)
             obs = env.reset()
-            self.assertEqual(obs.shape, (16,))
+            self.assertEqual(obs.shape, (18,))
             self.assertGreater(len(env.prices), 50)
             self.assertFalse(env.done)
 

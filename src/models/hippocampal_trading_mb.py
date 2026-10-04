@@ -16,7 +16,8 @@ FEATURE_ROLES = [
     "ROLE_RET1", "ROLE_RET5", "ROLE_RET20", "ROLE_RSI",
     "ROLE_SMA_RATIO", "ROLE_PRICE_SMA", "ROLE_VOL", "ROLE_VOL_RATIO",
     "ROLE_HOLDING", "ROLE_UNREALIZED", "ROLE_DURATION", "ROLE_DRAWDOWN",
-    "ROLE_TREND", "ROLE_MOMENTUM", "ROLE_RSI_SIG", "ROLE_CUM_RET"
+    "ROLE_TREND", "ROLE_MOMENTUM", "ROLE_RSI_SIG", "ROLE_CUM_RET",
+    "ROLE_VWAP", "ROLE_CHANNEL"
 ]
 
 
@@ -27,7 +28,7 @@ class HippocampalTradingMB:
     - Dentate Gyrus (DG): Ultra-sparse k-WTA (k=50, 2.44%) for market regime separation
     - CA3 Attractor & Trajectory Memory: Multi-bar temporal permutation (Π)
     - SWR Episodic Replay: Post-trade reverse replay for one-shot dopamine credit assignment
-    - Spinal CPG Risk Reflex: Enforces hard stop-loss (-3.0%) and volatility filters
+    - Spinal CPG Risk Reflex: Enforces hard stop-loss (-3.0%), trailing profit lock, and volatility filters
     """
     def __init__(
         self,
@@ -41,7 +42,8 @@ class HippocampalTradingMB:
         temperature: float = 0.20,
         temp_min: float = 0.02,
         temp_decay: float = 0.995,
-        stop_loss_pct: float = -0.03, # -3.0% hard stop-loss
+        stop_loss_pct: float = -0.03,         # -3.0% hard stop-loss
+        trailing_stop_pct: float = 0.02,     # 2.0% trailing profit lock from peak
         seed: Optional[int] = 42
     ):
         self.dim = dim
@@ -55,6 +57,7 @@ class HippocampalTradingMB:
         self.temp_min = temp_min
         self.temp_decay = temp_decay
         self.stop_loss_pct = stop_loss_pct
+        self.trailing_stop_pct = trailing_stop_pct
         self.ca3_steps = 2
         self.perm_shift = 17
 
@@ -89,6 +92,7 @@ class HippocampalTradingMB:
         self.last_dg_indices = np.array([], dtype=int)
         self.last_ca3_depth = 0
         self.inaction_counter = 0
+        self.peak_unrealized_pnl = 0.0
 
     def _init_innate_prototypes(self):
         """Initialize innate biological grounding for BUY, SELL, and HOLD prototypes."""
@@ -100,14 +104,17 @@ class HippocampalTradingMB:
             self.item_memory["ROLE_TREND"] * high_level * 2.5 +
             self.item_memory["ROLE_MOMENTUM"] * high_level * 2.5 +
             self.item_memory["ROLE_SMA_RATIO"] * high_level * 2.0 +
-            self.item_memory["ROLE_HOLDING"] * low_level * 2.0
+            self.item_memory["ROLE_HOLDING"] * low_level * 2.0 +
+            self.item_memory["ROLE_CHANNEL"] * high_level * 2.0 +
+            self.item_memory["ROLE_VWAP"] * high_level * 1.5
         )
 
         sell_innate = (
             self.item_memory["ROLE_TREND"] * low_level * 2.5 +
             self.item_memory["ROLE_MOMENTUM"] * low_level * 2.0 +
             self.item_memory["ROLE_RSI_SIG"] * high_level * 2.5 +
-            self.item_memory["ROLE_HOLDING"] * high_level * 2.0
+            self.item_memory["ROLE_HOLDING"] * high_level * 2.0 +
+            self.item_memory["ROLE_CHANNEL"] * low_level * 2.0
         )
 
         hold_innate = (
@@ -214,21 +221,34 @@ class HippocampalTradingMB:
     def check_cpg_risk_reflex(self, obs: np.ndarray, intended_action: int) -> Tuple[int, bool, str]:
         """
         Central Pattern Generator (CPG) Risk Reflex:
-        Spinal emergency reflex overriding decisions to enforce strict capital preservation:
+        Spinal emergency reflex overriding decisions to enforce capital preservation & profit protection:
         1. Hard Stop-Loss: If holding position and unrealized loss exceeds threshold, force SELL.
-        2. High Volatility Anomaly: If volatility spike is extreme, veto BUY into HOLD.
+        2. Trailing Profit Lock: If peak unrealized gain >= +3.0% and retraces by >= trailing_stop_pct, force SELL.
+        3. High Volatility Anomaly: If volatility spike is extreme, veto BUY into HOLD.
         """
         is_holding = (obs[8] > 0.5)
         unrealized_pnl_pct = (obs[9] / 10.0)  # De-normalize
         vol_norm = (obs[6] + 1.0) / 2.0
 
-        # Reflex 1: Hard Stop-Loss Protection
-        if is_holding and unrealized_pnl_pct <= self.stop_loss_pct:
-            return SELL, True, f"STOP-LOSS TRIGGERED ({unrealized_pnl_pct * 100:.1f}%)"
+        if is_holding:
+            # Track highest unrealized profit achieved during this position
+            self.peak_unrealized_pnl = max(self.peak_unrealized_pnl, unrealized_pnl_pct)
 
-        # Reflex 2: Volatility Spike Veto
-        if not is_holding and intended_action == BUY and vol_norm > 0.85:
-            return HOLD, True, "EXTREME VOLATILITY SPIKE VETO"
+            # Reflex 1: Hard Stop-Loss Protection
+            if unrealized_pnl_pct <= self.stop_loss_pct:
+                return SELL, True, f"HARD STOP-LOSS ({unrealized_pnl_pct * 100:.1f}%)"
+
+            # Reflex 2: Trailing Profit Lock (locking profits before they turn into losses)
+            if self.peak_unrealized_pnl >= 0.03:
+                giveback = self.peak_unrealized_pnl - unrealized_pnl_pct
+                if giveback >= self.trailing_stop_pct:
+                    return SELL, True, f"TRAILING PROFIT LOCK (+{unrealized_pnl_pct * 100:.1f}%)"
+        else:
+            self.peak_unrealized_pnl = 0.0
+
+            # Reflex 3: Volatility Spike Veto
+            if intended_action == BUY and vol_norm > 0.88:
+                return HOLD, True, "EXTREME VOLATILITY SPIKE VETO"
 
         return intended_action, False, ""
 
@@ -318,33 +338,44 @@ class HippocampalTradingMB:
         # Temperature decay
         self.temperature = max(self.temp_min, self.temperature * self.temp_decay)
 
-    def trigger_swr_episodic_replay(self, final_reward: float):
+    def trigger_swr_episodic_replay(self, final_reward: float, trade_return: float = 0.0):
         """
         Sharp-Wave Ripple (SWR) Episodic Replay:
-        Executes reverse sequence replay from trade exit back to entry,
+        Executes prioritized reverse sequence replay from trade exit back to entry,
         distributing dopamine credit assignment to earlier decisions in one shot.
+        Amplifies dopamine for Big Wins (> +2.0%) with prioritized multi-pass consolidation.
         """
         if not self.episode_experiences:
             return
 
         self.last_swr_active = True
-        replay_dopamine = float(final_reward)
-        discount = 0.85
-        curr_signal = replay_dopamine
 
-        for exp in reversed(self.episode_experiences):
-            repr_vec = exp["repr"]
-            action = exp["action"]
-            # Direct retroactive update on the action taken
-            self.action_prototypes[:, action] += (self.learning_rate * 0.5 * curr_signal * repr_vec)
-            self.action_prototypes[:, action] = np.maximum(0.01, self.action_prototypes[:, action])
-            curr_signal *= discount
+        # Prioritize Big Wins: amplify replay dopamine for high R-multiple trades
+        amp = 1.0
+        if trade_return > 0.02:
+            amp = 1.0 + min(3.0, trade_return * 25.0)
+        elif trade_return < -0.02:
+            amp = 1.4  # Strong negative memory reinforcement to prevent repeating large losses
+
+        replay_dopamine = float(final_reward) * amp
+        passes = 2 if abs(trade_return) >= 0.025 else 1
+
+        for _ in range(passes):
+            curr_signal = replay_dopamine
+            discount = 0.85
+            for exp in reversed(self.episode_experiences):
+                repr_vec = exp["repr"]
+                action = exp["action"]
+                # Direct retroactive update on the action taken
+                self.action_prototypes[:, action] += (self.learning_rate * 0.4 * curr_signal * repr_vec)
+                self.action_prototypes[:, action] = np.maximum(0.01, self.action_prototypes[:, action])
+                curr_signal *= discount
 
         # Clear buffer after replay
         self.episode_experiences.clear()
 
     def reset_traces(self):
-        """Reset eligibility traces and temporal sequence history."""
+        """Reset eligibility traces, temporal sequence history, and peak position metrics."""
         self.eligibility_traces.fill(0.0)
         self.temporal_history.clear()
         self.episode_experiences.clear()
@@ -352,3 +383,4 @@ class HippocampalTradingMB:
         self.last_cpg_triggered = False
         self.last_cpg_reason = ""
         self.inaction_counter = 0
+        self.peak_unrealized_pnl = 0.0

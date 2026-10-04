@@ -191,10 +191,12 @@ mushroom-body-neural-network/
 * Achieves **15,400+ FPS** (completes 2,000 full training episodes in **2.14 seconds**).
 
 ### 3.8 Hippocampal Cognitive Map for Algorithmic Stock Trading (`hippocampal_trading_mb.py` & `stock_trading_env.py`)
-* **Continuous Thermometer Quantization:** Entorhinal Cortex converts 16 continuous market & portfolio indicators (Returns, RSI, SMA ratios, ATR Volatility, Position, Drawdown) into orthogonal bipolar hypervectors ($D=2,048$) via level thermometer coding.
+* **Continuous Thermometer Quantization:** Entorhinal Cortex converts 18 continuous market & portfolio indicators (Returns, RSI, SMA ratios, ATR Volatility, Position, Drawdown, 20-period VWAP, Donchian Channel) into orthogonal bipolar hypervectors ($D=2,048$) via level thermometer coding.
 * **Dentate Gyrus (DG) Market Regime Separation:** Ultra-sparse $k$-WTA ($k=50$, 2.44% sparsity) forces orthogonal representations ($|\cos \theta| \le 0.05$) between conflicting market regimes (bull breakouts, bear cascades, sideways chop), eliminating catastrophic interference.
 * **CA3 Trajectory Sequence Memory ($\Pi$):** Circular permutation tracks multi-bar candlestick sequences $\mathbf{H}_{\text{market}} = \mathbf{S}_t + \Pi(\mathbf{S}_{t-1}) + \Pi^2(\mathbf{S}_{t-2}) + ...$ over a 5-step rolling window to recognize temporal chart patterns.
-* **Sharp-Wave Ripple (SWR) Post-Trade Replay:** Upon closing a trade, the sequence of decisions is replayed in reverse from exit back to entry, backpropagating realized profit/loss to the initial entry decision in a single trial.
+* **Prioritized SWR Replay for Big Wins:** Upon closing a trade, the sequence of decisions is replayed in reverse from exit back to entry. Profitable trades with high R-multiples ($>+2.0\%$) receive amplified dopamine pulses with multi-pass memory consolidation, embedding winning setups deeply into synaptic prototypes.
+* **Asymmetric Super-Linear Profit Reward (Let Profits Run):** Employs non-linear convex reward scaling where high-return trend runs receive super-linear multiplier bonuses and duration conviction rewards, while fast stop-losses (disciplined exits in $\le 3$ bars) receive penalty mitigation.
+* **Dynamic Conviction Position Sizing:** Dynamically scales capital deployment between 85% and 100% based on indicator confluence (VWAP, Donchian Channel, and SMA alignment), preserving liquidity during regime uncertainty.
 * **Opportunity-Cost & Inaction Elimination Engine:** Eliminates the classic RL "inaction trap" (capital preservation through complete inactivity) by enforcing:
   * **Opportunity Cost Penalty:** Penalizes cash holders when the market experiences bullish momentum and price rallies above moving averages without participation.
   * **Prolonged Inaction Drag:** Applies cumulative friction if holding cash for $>15$ consecutive bars during liquid trading regimes.
@@ -205,7 +207,9 @@ mushroom-body-neural-network/
   * `CRYPTO_VOLATILE`: Extreme drift (+40%), heavy volatility (48%), and asymmetric fat-tail jumps (e.g., BTC, ETH).
   * `DEFENSIVE_VALUE`: Low beta, high mean-reversion, and steady income consolidation.
   * `REAL_MARKET_CSV`: Direct loading of historical daily OHLCV datasets (`SPY_historical.csv`, `AAPL_historical.csv`, `BTC_historical.csv`).
-* **Spinal CPG Risk Reflex (Hard Stop-Loss):** An automatic spinal reflex vetoes model hesitation and forces an immediate liquidation (`SELL`) when position drawdown exceeds -3.0%, reducing portfolio drawdown by over 70% compared to Buy & Hold.
+* **Spinal CPG Risk Reflex (Dual Protection: Hard Stop + Trailing Lock):**
+  * **Hard Stop-Loss:** Forces immediate liquidation (`SELL`) when position drawdown exceeds -3.0%.
+  * **Trailing Profit Lock:** If peak unrealized gain reaches $\ge +3.0\%$ and subsequently retraces by $2.0\%$, the spinal reflex executes an immediate market sell, locking in gains and preventing big winning trades from turning into losses.
 
 ---
 
@@ -314,7 +318,7 @@ pip install -r requirements.txt
   ```
 
 ### 6.3 Running Automated Unit Tests
-Run the comprehensive test suite (21 test suites, 98 test cases passing 100%):
+Run the comprehensive test suite (21 test suites, 100 test cases passing 100%):
 ```bash
 python -m unittest discover tests
 ```

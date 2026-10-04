@@ -15,7 +15,7 @@ class TestTradingVisualizerApp(unittest.TestCase):
     def test_initial_headless_state(self):
         self.assertIsNotNone(self.app.env)
         self.assertIsNotNone(self.app.mb)
-        self.assertEqual(self.app.obs.shape, (16,))
+        self.assertEqual(self.app.obs.shape, (18,))
         self.assertEqual(self.app.env.cash, 10000.0)
         self.assertEqual(len(self.app.executed_trades), 0)
 
