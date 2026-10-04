@@ -14,11 +14,85 @@ SELL = 2
 
 ACTION_NAMES = {HOLD: "HOLD", BUY: "BUY", SELL: "SELL"}
 
+ASSET_PROFILES = {
+    "TECH_MOMENTUM": {
+        "name": "Tech Growth (High Momentum / High Beta)",
+        "base_price": 180.0,
+        "regimes": [
+            (0.28, 0.26, 60),    # Strong Tech Rally
+            (-0.16, 0.32, 40),   # Sharp Growth Pullback
+            (0.04, 0.18, 45),    # Consolidation
+            (0.35, 0.28, 65),    # Breakout Surge
+            (-0.10, 0.24, 42),   # Choppy Correction
+            (0.20, 0.22, 60)     # Sustained Momentum
+        ],
+        "jump_prob": 0.04,
+        "jump_mag": (0.02, 0.045)
+    },
+    "INDEX_ETF": {
+        "name": "Index ETF (S&P 500 / Steady Trend)",
+        "base_price": 480.0,
+        "regimes": [
+            (0.12, 0.13, 65),    # Steady Bullish Advance
+            (-0.10, 0.18, 35),   # Mild Market Correction
+            (0.02, 0.10, 50),    # Low-vol Sideways
+            (0.15, 0.14, 60),    # Trend Rally
+            (-0.04, 0.12, 45),   # Range-bound Chop
+            (0.10, 0.12, 60)     # Steady Uptrend
+        ],
+        "jump_prob": 0.015,
+        "jump_mag": (0.01, 0.025)
+    },
+    "CRYPTO_VOLATILE": {
+        "name": "Crypto Asset (High Volatility / Asymmetric)",
+        "base_price": 45000.0,
+        "regimes": [
+            (0.40, 0.48, 55),    # Parabolic Bull Run
+            (-0.35, 0.60, 45),   # Flash Crash & Capitulation
+            (0.05, 0.35, 45),    # High-volatility Accumulation
+            (0.50, 0.52, 60),    # Explosive Rally
+            (-0.25, 0.45, 50),   # Bearish Drain
+            (0.30, 0.40, 60)     # Recovery Momentum
+        ],
+        "jump_prob": 0.08,
+        "jump_mag": (0.04, 0.09)
+    },
+    "DEFENSIVE_VALUE": {
+        "name": "Defensive Value (Low Beta / Dividend)",
+        "base_price": 75.0,
+        "regimes": [
+            (0.06, 0.10, 60),    # Gradual Income Rise
+            (-0.06, 0.12, 45),   # Mild Dip
+            (0.01, 0.08, 60),    # Flat Range
+            (0.08, 0.11, 55),    # Modest Growth
+            (-0.03, 0.09, 50),   # Range Consolidation
+            (0.05, 0.09, 45)     # Steady Climb
+        ],
+        "jump_prob": 0.01,
+        "jump_mag": (0.008, 0.018)
+    },
+    "CYCLICAL_COMMODITY": {
+        "name": "Cyclical / Energy (Commodity Super-Cycle)",
+        "base_price": 90.0,
+        "regimes": [
+            (0.25, 0.28, 50),    # Commodity Boom
+            (-0.22, 0.35, 55),   # Inventory Glut Drop
+            (0.00, 0.22, 45),    # Supply/Demand Deadlock
+            (0.30, 0.30, 60),    # Energy Spike
+            (-0.15, 0.25, 50),   # Correction
+            (0.15, 0.22, 55)     # Cyclical Rebound
+        ],
+        "jump_prob": 0.04,
+        "jump_mag": (0.02, 0.05)
+    }
+}
+
 
 class StockTradingEnv:
     """
     Realistic financial trading environment with portfolio management,
     technical indicator generation, transaction frictions, and action masking.
+    Supports multi-asset profile generation and historical CSV data loading.
     """
     def __init__(
         self,
@@ -26,6 +100,7 @@ class StockTradingEnv:
         max_steps: int = 252,          # 1 trading year of daily bars
         slippage_pct: float = 0.0005,  # 0.05% slippage
         fee_pct: float = 0.001,        # 0.10% commission fee
+        asset_profile: str = "TECH_MOMENTUM",
         seed: Optional[int] = None,
         csv_path: Optional[str] = None
     ):
@@ -33,6 +108,7 @@ class StockTradingEnv:
         self.max_steps = int(max_steps)
         self.slippage_pct = float(slippage_pct)
         self.fee_pct = float(fee_pct)
+        self.asset_profile = asset_profile
         self.seed = seed
         self.csv_path = csv_path
         self.rng = np.random.default_rng(seed)
@@ -50,6 +126,7 @@ class StockTradingEnv:
         self.shares = 0
         self.entry_price = 0.0
         self.position_bars = 0
+        self.inaction_bars = 0         # Consecutive bars holding cash without trading
         self.peak_net_worth = self.initial_cash
         self.net_worth = self.initial_cash
         self.portfolio_history: List[float] = []
@@ -66,8 +143,16 @@ class StockTradingEnv:
         self._load_or_generate_market()
         self.reset()
 
+    def set_asset_profile(self, profile_key: str, csv_path: Optional[str] = None):
+        """Dynamically switch asset profile or historical CSV at runtime."""
+        if profile_key in ASSET_PROFILES:
+            self.asset_profile = profile_key
+        self.csv_path = csv_path
+        self._load_or_generate_market()
+        self.reset()
+
     def _load_or_generate_market(self):
-        """Generate stochastic market series (GBM + Jump Diffusion + Regime Shifts) or load CSV."""
+        """Generate stochastic market series from asset profile or load CSV."""
         if self.csv_path and os.path.exists(self.csv_path):
             import csv
             closes, highs, lows, vols = [], [], [], []
@@ -85,43 +170,42 @@ class StockTradingEnv:
             self.warmup_steps = 30
             return
 
-        # Generate realistic multi-regime market (Warmup 30 + max_steps + 10 buffer)
+        profile = ASSET_PROFILES.get(self.asset_profile, ASSET_PROFILES["TECH_MOMENTUM"])
         total_len = self.max_steps + 40
         dt = 1.0 / 252.0
-        base_price = 100.0
+        base_price = profile.get("base_price", 100.0)
+        regimes = profile.get("regimes", [
+            (0.15, 0.20, 60),
+            (-0.15, 0.25, 45),
+            (0.02, 0.12, 50),
+            (0.25, 0.22, 60),
+            (-0.05, 0.18, 50),
+            (0.10, 0.15, 60)
+        ])
+        jump_prob = profile.get("jump_prob", 0.03)
+        jump_min, jump_max = profile.get("jump_mag", (0.015, 0.04))
 
         prices = [base_price]
         highs = [base_price * 1.005]
         lows = [base_price * 0.995]
         vols = [1_000_000.0]
 
-        # Multi-regime parameters: (drift, volatility, duration)
-        regimes = [
-            (0.12, 0.16, 60),    # Steady Bullish
-            (-0.18, 0.28, 45),   # Bearish correction
-            (0.02, 0.12, 50),    # Low-volatility Sideways chop
-            (0.25, 0.22, 60),    # Strong Momentum Rally
-            (-0.05, 0.18, 50),   # Range-bound choppy
-            (0.10, 0.15, 60)     # Moderate Uptrend
-        ]
-
         curr_p = base_price
         for drift, vol, duration in regimes:
             for _ in range(duration):
                 if len(prices) >= total_len:
                     break
-                # Geometric Brownian Motion with occasional jumps
                 shock = self.rng.standard_normal()
                 jump = 0.0
-                if self.rng.random() < 0.03:  # 3% chance of jump
-                    jump = self.rng.choice([-1, 1]) * self.rng.uniform(0.015, 0.035)
+                if self.rng.random() < jump_prob:
+                    jump = self.rng.choice([-1, 1]) * self.rng.uniform(jump_min, jump_max)
 
                 ret = (drift - 0.5 * vol**2) * dt + vol * np.sqrt(dt) * shock + jump
-                curr_p = max(5.0, curr_p * np.exp(ret))
+                curr_p = max(1.0, curr_p * np.exp(ret))
 
                 intraday_vol = curr_p * vol * np.sqrt(dt) * self.rng.uniform(0.8, 1.8)
                 h = curr_p + abs(intraday_vol * self.rng.uniform(0.3, 1.0))
-                l = max(1.0, curr_p - abs(intraday_vol * self.rng.uniform(0.3, 1.0)))
+                l = max(0.5, curr_p - abs(intraday_vol * self.rng.uniform(0.3, 1.0)))
                 v = max(100_000.0, 1_000_000.0 * (1.0 + 2.0 * abs(ret)) * self.rng.uniform(0.7, 1.4))
 
                 prices.append(curr_p)
@@ -143,6 +227,7 @@ class StockTradingEnv:
         self.shares = 0
         self.entry_price = 0.0
         self.position_bars = 0
+        self.inaction_bars = 0
         self.peak_net_worth = self.initial_cash
         self.net_worth = self.initial_cash
         self.last_trade_return = 0.0
@@ -265,6 +350,7 @@ class StockTradingEnv:
         reward = 0.0
         executed_action = action
         trade_event = None
+        sma_20 = np.mean(self.prices[max(0, self.current_step - 19): self.current_step + 1])
 
         if action == BUY and mask[BUY]:
             # Execute Long Buy with slippage and commission fee
@@ -278,9 +364,18 @@ class StockTradingEnv:
                 self.shares = shares_to_buy
                 self.entry_price = exec_price
                 self.position_bars = 0
+                self.inaction_bars = 0
                 trade_event = "BUY"
                 # Small execution penalty to prevent churn
-                reward -= (self.fee_pct * 10.0)
+                reward -= (self.fee_pct * 5.0)
+
+                # Active Execution Incentive: reward initiating trades aligned with trend or oversold bounce
+                if curr_price >= sma_20:
+                    reward += 0.04
+                elif self.current_step > 14:
+                    diffs = np.diff(self.prices[self.current_step - 14: self.current_step + 1])
+                    if np.mean(np.maximum(diffs, 0.0)) < np.mean(np.abs(np.minimum(diffs, 0.0))):
+                        reward += 0.03
 
         elif action == SELL and mask[SELL]:
             # Execute Sell with slippage and commission fee
@@ -296,6 +391,7 @@ class StockTradingEnv:
             self.total_trades += 1
             self.total_realized_pnl += trade_pnl
             self.last_trade_return = trade_return
+            self.inaction_bars = 0
 
             if trade_pnl > 0:
                 self.winning_trades += 1
@@ -329,14 +425,27 @@ class StockTradingEnv:
                 step_ret = (curr_price - self.prices[self.current_step - 1]) / self.prices[self.current_step - 1]
                 reward += np.clip(step_ret * 3.0, -0.2, 0.2)
             else:
-                # Holding cash during downtrend is rewarded (Patience bonus)
-                sma_20 = np.mean(self.prices[self.current_step - 19: self.current_step + 1])
-                if curr_price < sma_20:
-                    reward += 0.02
+                self.inaction_bars += 1
 
         # Advance market step
         self.current_step += 1
         new_close = self.prices[self.current_step]
+        bar_ret = (new_close - curr_price) / curr_price
+
+        # Inaction & Opportunity Cost evaluation when holding cash
+        if self.shares == 0:
+            # 1. Opportunity Cost Penalty: stock rallied while holding cash
+            if bar_ret > 0.003 and curr_price >= (sma_20 * 0.99):
+                opp_cost = min(0.20, bar_ret * 5.0)
+                reward -= opp_cost
+
+            # 2. Prolonged Inaction Drag: holding cash for >15 bars without active engagement
+            if self.inaction_bars > 15:
+                reward -= 0.015
+
+            # 3. Prudence bonus: only rewarded if market experienced sharp decline
+            if curr_price < sma_20 and bar_ret < -0.005:
+                reward += 0.01
 
         # Update Net Worth
         self.net_worth = self.cash + (self.shares * new_close)
@@ -369,7 +478,8 @@ class StockTradingEnv:
             "drawdown": drawdown,
             "total_trades": self.total_trades,
             "win_rate": (self.winning_trades / max(1, self.total_trades)),
-            "benchmark_val": benchmark_val
+            "benchmark_val": benchmark_val,
+            "inaction_bars": self.inaction_bars
         }
 
         return self.get_observation(), float(reward), self.done, info

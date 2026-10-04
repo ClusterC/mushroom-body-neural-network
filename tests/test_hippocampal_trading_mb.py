@@ -96,6 +96,40 @@ class TestHippocampalTradingMB(unittest.TestCase):
         # Dale's Bound check
         self.assertTrue(np.all(self.agent.action_prototypes >= 0.0))
 
+    def test_inaction_exploration_drive(self):
+        obs = np.zeros(16, dtype=np.float32)
+        obs[8] = 0.0  # Not holding
+        mask = np.array([True, True, False], dtype=bool)
+
+        self.assertEqual(self.agent.inaction_counter, 0)
+        # Advance 16 steps without holding
+        for _ in range(16):
+            self.agent.select_action(obs, mask, training=False)
+
+        self.assertEqual(self.agent.inaction_counter, 16)
+
+        # Reset traces should clear inaction_counter
+        self.agent.reset_traces()
+        self.assertEqual(self.agent.inaction_counter, 0)
+
+    def test_active_trading_under_bullish_market(self):
+        from src.envs.stock_trading_env import StockTradingEnv
+        env = StockTradingEnv(initial_cash=10000.0, max_steps=100, asset_profile="TECH_MOMENTUM", seed=42)
+        obs = env.reset()
+        self.agent.reset_traces()
+
+        # Simulate 100 steps and check that the agent engages in active trading (no inaction trap)
+        while not env.done:
+            mask = env.get_action_mask()
+            action, _, _, _ = self.agent.select_action(obs, mask, training=True)
+            obs, rew, done, info = env.step(action)
+            self.agent.update_plasticity(rew)
+            if info.get("trade_event") == "SELL":
+                self.agent.trigger_swr_episodic_replay(rew)
+
+        # Agent must execute at least 1 trade during the rally, not staying idle
+        self.assertGreater(env.total_trades, 0, "AI agent should not remain trapped in complete inaction")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -38,6 +38,17 @@ class TestTradingVisualizerApp(unittest.TestCase):
         self.app.train_episodes(n_episodes=2)
         self.assertEqual(self.app.total_trained_episodes, 2)
 
+    def test_asset_profile_switching(self):
+        initial_idx = self.app.asset_idx
+        self.app.asset_idx = (self.app.asset_idx + 1) % len(self.app.asset_profiles_list)
+        prof_key, prof_label, csv_f = self.app.asset_profiles_list[self.app.asset_idx]
+        self.app.env.set_asset_profile(prof_key, csv_path=csv_f)
+        self.app.reset_simulation()
+
+        self.assertNotEqual(self.app.asset_idx, initial_idx)
+        self.assertEqual(self.app.env.asset_profile, prof_key)
+        self.assertEqual(len(self.app.executed_trades), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

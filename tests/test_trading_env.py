@@ -84,6 +84,45 @@ class TestStockTradingEnv(unittest.TestCase):
         self.assertTrue(self.env.done)
         self.assertGreaterEqual(self.env.current_step, 50)
 
+    def test_asset_profiles_generation(self):
+        profiles = ["TECH_MOMENTUM", "INDEX_ETF", "CRYPTO_VOLATILE", "DEFENSIVE_VALUE", "CYCLICAL_COMMODITY"]
+        for prof in profiles:
+            env = StockTradingEnv(initial_cash=10000.0, max_steps=40, asset_profile=prof, seed=42)
+            obs = env.reset()
+            self.assertEqual(obs.shape, (16,))
+            self.assertTrue(np.all(np.isfinite(obs)))
+            self.assertGreater(len(env.prices), 40)
+            self.assertTrue(np.all(env.prices > 0))
+
+    def test_dynamic_set_asset_profile(self):
+        self.env.set_asset_profile("CRYPTO_VOLATILE")
+        self.assertEqual(self.env.asset_profile, "CRYPTO_VOLATILE")
+        self.assertEqual(self.env.cash, 10000.0)
+        self.assertEqual(self.env.shares, 0)
+        self.assertGreater(self.env.prices[0], 1000.0)
+
+    def test_real_csv_loading(self):
+        import os
+        csv_path = "data/assets/SPY_historical.csv"
+        if os.path.exists(csv_path):
+            env = StockTradingEnv(initial_cash=10000.0, csv_path=csv_path)
+            obs = env.reset()
+            self.assertEqual(obs.shape, (16,))
+            self.assertGreater(len(env.prices), 50)
+            self.assertFalse(env.done)
+
+    def test_inaction_tracking_and_penalty(self):
+        # Step HOLD while in cash: inaction_bars should increment
+        self.assertEqual(self.env.inaction_bars, 0)
+        obs, reward, done, info = self.env.step(HOLD)
+        self.assertEqual(self.env.inaction_bars, 1)
+        self.assertEqual(info["inaction_bars"], 1)
+
+        # Buying should reset inaction_bars to 0
+        obs, reward, done, info = self.env.step(BUY)
+        self.assertEqual(self.env.inaction_bars, 0)
+        self.assertEqual(info["inaction_bars"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

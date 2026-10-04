@@ -190,11 +190,21 @@ mushroom-body-neural-network/
 * Computes $k$-WTA via `torch.topk` and three-factor eligibility updates via tensor matrix operations.
 * Achieves **15,400+ FPS** (completes 2,000 full training episodes in **2.14 seconds**).
 
-### 3.8 Hippocampal Cognitive Map for Algorithmic Stock Trading (`hippocampal_trading_mb.py`)
+### 3.8 Hippocampal Cognitive Map for Algorithmic Stock Trading (`hippocampal_trading_mb.py` & `stock_trading_env.py`)
 * **Continuous Thermometer Quantization:** Entorhinal Cortex converts 16 continuous market & portfolio indicators (Returns, RSI, SMA ratios, ATR Volatility, Position, Drawdown) into orthogonal bipolar hypervectors ($D=2,048$) via level thermometer coding.
 * **Dentate Gyrus (DG) Market Regime Separation:** Ultra-sparse $k$-WTA ($k=50$, 2.44% sparsity) forces orthogonal representations ($|\cos \theta| \le 0.05$) between conflicting market regimes (bull breakouts, bear cascades, sideways chop), eliminating catastrophic interference.
 * **CA3 Trajectory Sequence Memory ($\Pi$):** Circular permutation tracks multi-bar candlestick sequences $\mathbf{H}_{\text{market}} = \mathbf{S}_t + \Pi(\mathbf{S}_{t-1}) + \Pi^2(\mathbf{S}_{t-2}) + ...$ over a 5-step rolling window to recognize temporal chart patterns.
 * **Sharp-Wave Ripple (SWR) Post-Trade Replay:** Upon closing a trade, the sequence of decisions is replayed in reverse from exit back to entry, backpropagating realized profit/loss to the initial entry decision in a single trial.
+* **Opportunity-Cost & Inaction Elimination Engine:** Eliminates the classic RL "inaction trap" (capital preservation through complete inactivity) by enforcing:
+  * **Opportunity Cost Penalty:** Penalizes cash holders when the market experiences bullish momentum and price rallies above moving averages without participation.
+  * **Prolonged Inaction Drag:** Applies cumulative friction if holding cash for $>15$ consecutive bars during liquid trading regimes.
+  * **Active Execution Incentive:** Provides upfront dopamine encouragement upon entering positions aligned with trend breakouts or oversold reversals, offsetting transaction fees.
+* **Multi-Asset Real-World Market Engine:** Simulates distinct stochastic market profiles with tailored volatility and jump distributions:
+  * `TECH_MOMENTUM`: High drift (+28%), high beta, and explosive breakout rallies (e.g., NVDA, AAPL).
+  * `INDEX_ETF`: Stable institutional drift (+12%), moderate volatility, and mean-reverting pullbacks (e.g., S&P 500, SET50).
+  * `CRYPTO_VOLATILE`: Extreme drift (+40%), heavy volatility (48%), and asymmetric fat-tail jumps (e.g., BTC, ETH).
+  * `DEFENSIVE_VALUE`: Low beta, high mean-reversion, and steady income consolidation.
+  * `REAL_MARKET_CSV`: Direct loading of historical daily OHLCV datasets (`SPY_historical.csv`, `AAPL_historical.csv`, `BTC_historical.csv`).
 * **Spinal CPG Risk Reflex (Hard Stop-Loss):** An automatic spinal reflex vetoes model hesitation and forces an immediate liquidation (`SELL`) when position drawdown exceeds -3.0%, reducing portfolio drawdown by over 70% compared to Buy & Hold.
 
 ---
@@ -268,9 +278,10 @@ Comprehensive evaluations across `experiments/run_poc_experiments.py`, `experime
 </p>
 
 * **Real-time Price & Indicator Chart:** Live plotting of price bars with SMA-5 and SMA-20 trend overlays, and glowing Buy/Sell execution flags.
+* **Interactive Multi-Asset Profile Selector:** Clickable cycle button allowing instant real-time switching between asset classes (`TECH GROWTH`, `INDEX ETF`, `CRYPTO BTC`, `DEFENSIVE VALUE`) and historical daily market data (`REAL: SPY ETF`, `REAL: AAPL`, `REAL: BTC/USD`).
 * **Portfolio Equity Monitor:** Live equity curve tracking net worth vs. the Buy & Hold benchmark with telemetry gauges (Cash, Shares, Unrealized PnL %, Cumulative Return %, Win Rate %, Max Drawdown %).
 * **Hippocampal Neural Monitor:** 50 active granule cells in Dentate Gyrus (2.44% sparsity), CA3 multi-bar trajectory depth meter, and instant alert banners for **SWR EPISODIC REPLAY: ACTIVE** and **CPG RISK REFLEX: STOP-LOSS**.
-* **Controls:** Step, Auto-Trade, Speed scaling (1x to 10x), Live Plasticity toggle, CPG Stop-Loss toggle, Reset, and **TRAIN HISTORICAL (+500 EP)**.
+* **Controls:** Step, Auto-Trade, Speed scaling (1x to 10x), Asset Selector cycle button, Live Plasticity toggle, CPG Stop-Loss toggle, Reset, and **TRAIN HISTORICAL (+500 EP)**.
 
 ---
 
@@ -303,7 +314,7 @@ pip install -r requirements.txt
   ```
 
 ### 6.3 Running Automated Unit Tests
-Run the comprehensive test suite (21 test suites, 91 test cases passing 100%):
+Run the comprehensive test suite (21 test suites, 98 test cases passing 100%):
 ```bash
 python -m unittest discover tests
 ```

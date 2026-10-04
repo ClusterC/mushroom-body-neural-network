@@ -88,6 +88,7 @@ class HippocampalTradingMB:
         self.last_action_probs = np.ones(num_actions) / num_actions
         self.last_dg_indices = np.array([], dtype=int)
         self.last_ca3_depth = 0
+        self.inaction_counter = 0
 
     def _init_innate_prototypes(self):
         """Initialize innate biological grounding for BUY, SELL, and HOLD prototypes."""
@@ -96,27 +97,27 @@ class HippocampalTradingMB:
         mid_level = self.level_hypervectors[self.num_levels // 2]
 
         buy_innate = (
-            self.item_memory["ROLE_TREND"] * high_level * 2.0 +
-            self.item_memory["ROLE_MOMENTUM"] * high_level * 2.0 +
-            self.item_memory["ROLE_SMA_RATIO"] * high_level * 1.5 +
-            self.item_memory["ROLE_HOLDING"] * low_level * 1.5
+            self.item_memory["ROLE_TREND"] * high_level * 2.5 +
+            self.item_memory["ROLE_MOMENTUM"] * high_level * 2.5 +
+            self.item_memory["ROLE_SMA_RATIO"] * high_level * 2.0 +
+            self.item_memory["ROLE_HOLDING"] * low_level * 2.0
         )
 
         sell_innate = (
-            self.item_memory["ROLE_TREND"] * low_level * 2.0 +
-            self.item_memory["ROLE_MOMENTUM"] * low_level * 1.5 +
-            self.item_memory["ROLE_RSI_SIG"] * high_level * 2.0 +
+            self.item_memory["ROLE_TREND"] * low_level * 2.5 +
+            self.item_memory["ROLE_MOMENTUM"] * low_level * 2.0 +
+            self.item_memory["ROLE_RSI_SIG"] * high_level * 2.5 +
             self.item_memory["ROLE_HOLDING"] * high_level * 2.0
         )
 
         hold_innate = (
-            self.item_memory["ROLE_VOL"] * mid_level * 1.0 +
-            self.item_memory["ROLE_TREND"] * mid_level * 1.0
+            self.item_memory["ROLE_VOL"] * mid_level * 0.5 +
+            self.item_memory["ROLE_TREND"] * mid_level * 0.5
         )
 
-        self.action_prototypes[:, HOLD] += np.maximum(0.01, hold_innate * 0.15)
-        self.action_prototypes[:, BUY] += np.maximum(0.01, buy_innate * 0.20)
-        self.action_prototypes[:, SELL] += np.maximum(0.01, sell_innate * 0.20)
+        self.action_prototypes[:, HOLD] += np.maximum(0.01, hold_innate * 0.05)
+        self.action_prototypes[:, BUY] += np.maximum(0.01, buy_innate * 0.25)
+        self.action_prototypes[:, SELL] += np.maximum(0.01, sell_innate * 0.25)
 
     def _init_item_memory(self):
         """Initialize orthogonal bipolar hypervectors (-1, +1) for feature roles and level bins."""
@@ -253,7 +254,25 @@ class HippocampalTradingMB:
             combined_repr /= norm
 
         # Action Prototype Readout via Cosine Similarity
-        scores = np.dot(combined_repr, self.action_prototypes)
+        scores = np.dot(combined_repr, self.action_prototypes).astype(np.float32)
+
+        # Dynamic Trend Sensitivity & Exploration Drive to prevent Inaction Trap
+        is_holding = (obs[8] > 0.5)
+        if not is_holding:
+            self.inaction_counter += 1
+            # Trend Confluence: reward BUY readiness when market is bullish
+            trend_confluence = (obs[12] * 0.08) + (obs[13] * 0.08)
+            if trend_confluence > 0:
+                scores[BUY] += float(trend_confluence)
+
+            # Exploration Drive: if idling in cash for too long, boost BUY exploration
+            if self.inaction_counter > 15:
+                scores[BUY] += 0.08
+        else:
+            self.inaction_counter = 0
+            # Exit Confluence: boost SELL readiness if trend breaks down or overbought
+            if obs[12] < 0 or obs[14] > 0.5:
+                scores[SELL] += 0.08
 
         # Mask illegal actions
         masked_scores = np.where(action_mask, scores, -1e9)
@@ -332,3 +351,4 @@ class HippocampalTradingMB:
         self.last_swr_active = False
         self.last_cpg_triggered = False
         self.last_cpg_reason = ""
+        self.inaction_counter = 0

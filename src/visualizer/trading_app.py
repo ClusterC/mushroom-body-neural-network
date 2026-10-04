@@ -63,8 +63,20 @@ class TradingVisualizerApp:
             self.clock = None
             self.fonts = None
 
+        # Asset Profiles configuration
+        self.asset_profiles_list = [
+            ("TECH_MOMENTUM", "TECH GROWTH (HIGH BETA)", None),
+            ("INDEX_ETF", "INDEX ETF (S&P 500)", None),
+            ("CRYPTO_VOLATILE", "CRYPTO (BTC VOLATILE)", None),
+            ("DEFENSIVE_VALUE", "DEFENSIVE VALUE (DIVIDEND)", None),
+            ("REAL_SPY", "REAL MARKET: SPY ETF", "data/assets/SPY_historical.csv"),
+            ("REAL_AAPL", "REAL MARKET: AAPL TECH", "data/assets/AAPL_historical.csv"),
+            ("REAL_BTC", "REAL MARKET: BTC/USD", "data/assets/BTC_historical.csv"),
+        ]
+        self.asset_idx = 0
+
         # Environment & Hippocampal Agent
-        self.env = StockTradingEnv(initial_cash=10000.0, max_steps=252, seed=42)
+        self.env = StockTradingEnv(initial_cash=10000.0, max_steps=252, asset_profile="TECH_MOMENTUM", seed=42)
         self.mb = HippocampalTradingMB(dim=2048, k_dg=50, k_ca3=120, stop_loss_pct=-0.03, seed=42)
 
         # Simulation state
@@ -106,15 +118,17 @@ class TradingVisualizerApp:
             return pygame.font.Font(None, size)
 
     def _init_buttons(self):
-        btn_y = 520
+        btn_y = 512
+        prof_label = self.asset_profiles_list[self.asset_idx][1]
         self.buttons = {
-            'step': UIButton((850, btn_y, 90, 36), "STEP", self.fonts['sub'], active_color=(55, 65, 81)),
-            'auto': UIButton((950, btn_y, 140, 36), "AUTO-TRADE: OFF", self.fonts['sub'], active_color=COLOR_BULL_GREEN),
-            'speed': UIButton((1100, btn_y, 110, 36), f"SPEED: {self.speed_mode}x", self.fonts['sub']),
-            'plasticity': UIButton((850, btn_y + 46, 170, 36), "PLASTICITY: ON", self.fonts['sub'], active_color=(139, 92, 246), active=True),
-            'cpg': UIButton((1030, btn_y + 46, 180, 36), "CPG STOP-LOSS: ON", self.fonts['sub'], active_color=COLOR_AMBER_DG, active=True),
-            'reset': UIButton((850, btn_y + 92, 90, 36), "RESET", self.fonts['sub'], base_color=(75, 85, 99)),
-            'train': UIButton((950, btn_y + 92, 260, 36), "⚡ TRAIN HISTORICAL (+500 EP)", self.fonts['sub'], active_color=COLOR_SWR_GOLD, active=True)
+            'asset': UIButton((850, 474, 395, 30), f"ASSET: {prof_label} ▾", self.fonts['sub'], active_color=(37, 99, 235), active=True),
+            'step': UIButton((850, btn_y, 90, 34), "STEP", self.fonts['sub'], active_color=(55, 65, 81)),
+            'auto': UIButton((950, btn_y, 140, 34), "AUTO-TRADE: OFF", self.fonts['sub'], active_color=COLOR_BULL_GREEN),
+            'speed': UIButton((1100, btn_y, 110, 34), f"SPEED: {self.speed_mode}x", self.fonts['sub']),
+            'plasticity': UIButton((850, btn_y + 42, 170, 34), "PLASTICITY: ON", self.fonts['sub'], active_color=(139, 92, 246), active=True),
+            'cpg': UIButton((1030, btn_y + 42, 180, 34), "CPG STOP-LOSS: ON", self.fonts['sub'], active_color=COLOR_AMBER_DG, active=True),
+            'reset': UIButton((850, btn_y + 84, 90, 34), "RESET", self.fonts['sub'], base_color=(75, 85, 99)),
+            'train': UIButton((950, btn_y + 84, 260, 34), "⚡ TRAIN HISTORICAL (+500 EP)", self.fonts['sub'], active_color=COLOR_SWR_GOLD, active=True)
         }
 
     def show_toast(self, msg: str, color=COLOR_BULL_GREEN, duration: float = 3.0):
@@ -217,9 +231,10 @@ class TradingVisualizerApp:
         # Header info
         curr_price = float(self.env.prices[self.env.current_step])
         step_idx = self.env.current_step
-        self.screen.blit(self.fonts['title'].render("MARKET PRICE & TECHNICAL OSCILLATOR", True, COLOR_TEXT_PRIMARY), (35, 75))
-        price_str = f"PRICE: ${curr_price:.2f}   |   BAR: {step_idx}/{len(self.env.prices)}"
-        self.screen.blit(self.fonts['mono'].render(price_str, True, COLOR_SMA_SHORT), (480, 75))
+        asset_label = self.asset_profiles_list[self.asset_idx][1]
+        self.screen.blit(self.fonts['title'].render(f"PRICE CHART: {asset_label}", True, COLOR_TEXT_PRIMARY), (35, 75))
+        price_str = f"PRICE: ${curr_price:.2f}  |  BAR: {step_idx}/{len(self.env.prices)}"
+        self.screen.blit(self.fonts['mono'].render(price_str, True, COLOR_SMA_SHORT), (450, 75))
 
         # Chart plotting area
         chart_x, chart_y, chart_w, chart_h = 35, 110, 765, 290
@@ -427,7 +442,7 @@ class TradingVisualizerApp:
 
     def draw_controls(self):
         """Draw interactive control buttons and toast notifications."""
-        panel_rect = pygame.Rect(835, 520, 425, 220)
+        panel_rect = pygame.Rect(835, 465, 425, 275)
         pygame.draw.rect(self.screen, COLOR_PANEL_BG, panel_rect, border_radius=10)
         pygame.draw.rect(self.screen, COLOR_PANEL_BORDER, panel_rect, width=1, border_radius=10)
 
@@ -436,10 +451,10 @@ class TradingVisualizerApp:
 
         # Toast notification
         if time.time() < self.toast_timer:
-            toast_rect = pygame.Rect(850, 665, 395, 32)
+            toast_rect = pygame.Rect(850, 696, 395, 30)
             pygame.draw.rect(self.screen, (15, 23, 42), toast_rect, border_radius=6)
             pygame.draw.rect(self.screen, self.toast_color, toast_rect, width=1, border_radius=6)
-            self.screen.blit(self.fonts['small'].render(self.toast_msg, True, self.toast_color), (860, 672))
+            self.screen.blit(self.fonts['small'].render(self.toast_msg, True, self.toast_color), (860, 703))
 
     def draw_all(self):
         """Render the complete application interface."""
@@ -469,7 +484,14 @@ class TradingVisualizerApp:
 
             for name, btn in self.buttons.items():
                 if btn.handle_event(event):
-                    if name == 'step':
+                    if name == 'asset':
+                        self.asset_idx = (self.asset_idx + 1) % len(self.asset_profiles_list)
+                        prof_key, prof_label, csv_f = self.asset_profiles_list[self.asset_idx]
+                        btn.text = f"ASSET: {prof_label} ▾"
+                        self.env.set_asset_profile(prof_key, csv_path=csv_f)
+                        self.reset_simulation()
+                        self.show_toast(f"SWITCHED ASSET: {prof_label}", color=COLOR_BULL_GREEN)
+                    elif name == 'step':
                         self.step_simulation()
                     elif name == 'auto':
                         self.auto_trade = not self.auto_trade
