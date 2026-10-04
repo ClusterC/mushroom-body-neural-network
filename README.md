@@ -2,6 +2,12 @@
 
 A biomimetic neuromorphic computing framework modeling the insect **Mushroom Body (MB)** (*Drosophila melanogaster* / *Apis mellifera*) and mammalian **Hippocampal-Entorhinal Cognitive Map** (*DG-CA3*). Features High-Dimensional Sparse Expansion, Three-Factor Local Hebbian Plasticity, Hyperdimensional Computing (HDC-VSA), and Sharp-Wave Ripple (SWR) Episodic Replay for real-time game playing, robotic foraging, and few-shot continuous adaptation.
 
+<p align="center">
+  <img src="assets/snake_demo.gif" width="32%" alt="Visual Snake Arena Demo"/>
+  <img src="assets/bee_demo.gif" width="32%" alt="Honeybee Meadow Foraging Demo"/>
+  <img src="assets/xo_demo.gif" width="32%" alt="Tic-Tac-Toe Matchup Demo"/>
+</p>
+
 ---
 
 ## 1. System Architecture Diagram
@@ -57,6 +63,12 @@ mushroom-body-neural-network/
 ├── run_XO_visualizer.py                       # Desktop Pygame Visualizer for Tic-Tac-Toe Arena
 ├── run_snake_visualizer.py                    # Desktop Pygame Visualizer for Visual Snake Arena
 ├── run_bee_visualizer.py                      # Desktop Pygame Visualizer for Honeybee Foraging Simulator
+├── assets/                                    # Animated simulation demonstration GIFs
+│   ├── snake_demo.gif                         # Visual Snake Arena demonstration
+│   ├── bee_demo.gif                           # Honeybee Meadow Foraging demonstration
+│   └── xo_demo.gif                            # Tic-Tac-Toe SWR Replay demonstration
+├── scripts/
+│   └── generate_demo_gifs.py                  # Automated headless Pygame GIF recorder
 ├── doc/
 │   └── Mushroom_Body_Project_Scope.md         # Comprehensive project scope and research specifications
 ├── src/
@@ -193,6 +205,11 @@ Comprehensive evaluations across `experiments/run_poc_experiments.py`, `experime
 ## 5. Interactive Desktop Pygame Visualizers
 
 ### 5.1 Visual Snake Arena (`run_snake_visualizer.py`)
+
+<p align="center">
+  <img src="assets/snake_demo.gif" alt="Visual Snake Arena Simulation Demo" width="760"/>
+</p>
+
 * **10x10 Spatial Arena:** Real-time rendering of glowing snake kinematics, apple targets, and 3-beam **Egocentric Whisker Radars** emitted from the head.
 * **Optic Lobe Display:** Retinotopic 3-channel visual matrix (Head, Body Gradient, Food).
 * **Quad-Architecture Live Switch (Press 'B'):**
@@ -205,6 +222,11 @@ Comprehensive evaluations across `experiments/run_poc_experiments.py`, `experime
 * **GPU Accelerator Button:** Interactive **TRAIN ON GPU (+2,000 EP)** trigger executing 2,000 episodes on CUDA cores within ~2.1 seconds.
 
 ### 5.2 Honeybee Meadow Foraging Simulator (`run_bee_visualizer.py`)
+
+<p align="center">
+  <img src="assets/bee_demo.gif" alt="Honeybee Meadow Foraging Simulation Demo" width="760"/>
+</p>
+
 * **20x20 Meadow Arena:** Simulated floral meadow with central hive, 4 flower species (Lavender, Chamomile, Wild Rose, Toxic Blue), blooming nectar concentrations, and spatial odor plume halos.
 * **Multisensory Dashboard:** Dynamic gauges for 4 odor channels, tri-directional compound eyes (UV, Blue, Green), crop nectar load, metabolic energy, and hive vector.
 * **Tri-Zonal Calyx Neural Matrix:** 2,500 Kenyon Cells mapped into anatomical zones (Lip: Olfactory, Collar: Visual, Basal Ring: Multi-modal) with 125 active cells illuminated.
@@ -212,6 +234,11 @@ Comprehensive evaluations across `experiments/run_poc_experiments.py`, `experime
 * **Controls:** Step, Auto-Fly, 1x-10x Speed Scaling, Live Plasticity toggle, and **TRAIN FORAGING (+500 TRIPS)**.
 
 ### 5.3 Tic-Tac-Toe (XO) Matchup Visualizer (`run_XO_visualizer.py` / `run_visualizer.py`)
+
+<p align="center">
+  <img src="assets/xo_demo.gif" alt="Tic-Tac-Toe Matchup Demo" width="760"/>
+</p>
+
 * **Multi-Agent Roster:** Matchups between Hippocampal MB ($D=2,048$), Canonical MB (1,000 KC), Tabular Q-Learning, Heuristic, Minimax, Random, and Human players.
 * **Adaptive Circuit Monitor:** Automatically switches telemetry display between Canonical Kenyon Cell grid (1,000 neurons / 75 active) and Hippocampal Dentate Gyrus map (50 granule cells with CA3 depth and SWR replay alerts).
 * **Interactive Learning Controls:** Live Plasticity toggle, Train Heuristic (+500), and Train Self-Play (+500).
