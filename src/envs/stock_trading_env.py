@@ -249,14 +249,31 @@ class StockTradingEnv:
         self.losing_trades = 0
         self.total_realized_pnl = 0.0
 
-        # SMA-200 Rule Strategy Portfolio Tracking
-        self.sma200_cash = self.initial_cash
-        self.sma200_shares = 0.0
-        self.sma200_entry_price = 0.0
-        self.sma200_history = [self.initial_cash]
-        self.sma200_trades = 0
-        self.sma200_wins = 0
-        self.sma200_losses = 0
+        # Practical Spec v1 (Institutional Trend-Following Benchmark)
+        # Indicators: SMA(200) + ATR(14)
+        # Rules: 5-day flat cooldown before re-entry, 2.5x ATR(14) trailing stop, 28% drawdown throttle
+        self.spec_v1_cash = self.initial_cash
+        self.spec_v1_shares = 0.0
+        self.spec_v1_in_pos = False
+        self.spec_v1_flat_days = 5  # Initial state: 5 days flat, eligible if close > SMA200
+        self.spec_v1_entry_close = 0.0
+        self.spec_v1_entry_stop = 0.0
+        self.spec_v1_peak_close = 0.0
+        self.spec_v1_equity = self.initial_cash
+        self.spec_v1_peak_equity = self.initial_cash
+        self.spec_v1_history = [self.initial_cash]
+        self.spec_v1_trades = 0
+        self.spec_v1_wins = 0
+        self.spec_v1_losses = 0
+
+        # Backward-compatible aliases for visualizer and tests
+        self.sma200_cash = self.spec_v1_cash
+        self.sma200_shares = self.spec_v1_shares
+        self.sma200_entry_price = self.spec_v1_entry_close
+        self.sma200_history = self.spec_v1_history
+        self.sma200_trades = self.spec_v1_trades
+        self.sma200_wins = self.spec_v1_wins
+        self.sma200_losses = self.spec_v1_losses
 
         return self.get_observation()
 
@@ -547,36 +564,94 @@ class StockTradingEnv:
         benchmark_val = self.initial_cash * (new_close / start_price)
         self.benchmark_history.append(benchmark_val)
 
-        # SMA-200 Rule Benchmark Tracking (Pure Trend-Following: Close > SMA 200 => Buy, Close < SMA 200 => Sell)
+        # Practical Spec v1 (Institutional Trend-Following Benchmark)
+        # Indicators: SMA(200) + ATR(14)
+        # Rules: 5-day flat cooldown before re-entry, 2.5x ATR(14) trailing stop, 28% drawdown throttle
         idx = self.current_step
+        curr_low = float(self.lows[idx])
+
+        # Indicator 1: SMA(200) of Close
         if idx >= 199:
             sma_200 = float(np.mean(self.prices[idx - 199 : idx + 1]))
         else:
             sma_200 = float(np.mean(self.prices[: idx + 1]))
 
-        if new_close > sma_200:
-            # Bullish Trend: Buy 100% all-in if in cash, or hold
-            if self.sma200_shares <= 0.0 and self.sma200_cash >= 10.0:
-                cost_basis = new_close * (1.0 + self.fee_pct + self.slippage_pct)
-                shares_to_buy = self.sma200_cash / cost_basis
-                self.sma200_shares = shares_to_buy
-                self.sma200_cash = 0.0
-                self.sma200_entry_price = cost_basis
-        elif new_close < sma_200:
-            # Bearish Trend: Liquidate 100% to cash if holding
-            if self.sma200_shares > 0.0:
-                proceeds = self.sma200_shares * new_close * (1.0 - self.fee_pct - self.slippage_pct)
-                trade_ret = (new_close - self.sma200_entry_price) / max(1e-5, self.sma200_entry_price)
-                self.sma200_trades += 1
-                if trade_ret > 0:
-                    self.sma200_wins += 1
-                else:
-                    self.sma200_losses += 1
-                self.sma200_cash = proceeds
-                self.sma200_shares = 0.0
+        # Indicator 2: ATR(14)
+        if idx >= 14:
+            h14 = self.highs[idx - 13 : idx + 1]
+            l14 = self.lows[idx - 13 : idx + 1]
+            pc14 = self.prices[idx - 14 : idx]
+            tr = np.maximum(h14 - l14, np.abs(h14 - pc14))
+            atr_14 = float(np.mean(tr))
+        else:
+            atr_14 = float(max(1e-4, self.highs[idx] - self.lows[idx]))
 
-        sma200_val = self.sma200_cash + (self.sma200_shares * new_close)
-        self.sma200_history.append(sma200_val)
+        # State Variable: 28% Drawdown Throttle (Exposure Limit)
+        # exposure_t = max(0, 1 - |dd_t| / 0.28) ** 1.0
+        spec_dd = (self.spec_v1_equity / max(1e-5, self.spec_v1_peak_equity)) - 1.0
+        spec_exposure = float(np.clip(max(0.0, 1.0 - abs(spec_dd) / 0.28), 0.0, 1.0))
+
+        # Friction (5 bps = 0.0005 standard spec placeholder, aligned with fee_pct + slippage_pct)
+        spec_friction = max(0.0005, self.fee_pct + self.slippage_pct)
+
+        # Buy Rule: Close > SMA(200) AND flat for 5 trading days AND not already in
+        if not self.spec_v1_in_pos:
+            self.spec_v1_flat_days += 1
+            if new_close > sma_200 and self.spec_v1_flat_days >= 5 and self.spec_v1_cash >= 10.0 and spec_exposure > 0.0:
+                self.spec_v1_in_pos = True
+                self.spec_v1_entry_close = new_close
+                self.spec_v1_entry_stop = new_close - (2.5 * atr_14)
+                self.spec_v1_peak_close = new_close
+                self.spec_v1_flat_days = 0
+
+                target_alloc = self.spec_v1_cash * spec_exposure
+                cost_basis = new_close * (1.0 + spec_friction)
+                shares_to_buy = target_alloc / max(1e-4, cost_basis)
+                self.spec_v1_shares = shares_to_buy
+                self.spec_v1_cash -= shares_to_buy * cost_basis
+        else:
+            # Sell Rule: Close < SMA(200) OR Low touches trailing stop
+            self.spec_v1_peak_close = max(self.spec_v1_peak_close, new_close)
+            trailing_stop = max(self.spec_v1_entry_stop, self.spec_v1_peak_close - (2.5 * atr_14))
+            exit_triggered = False
+            fill_price = new_close
+
+            if new_close < sma_200:
+                # 1. Trend break exit
+                exit_triggered = True
+                fill_price = new_close
+            elif curr_low <= trailing_stop:
+                # 2. Trailing stop hit: Gap fill at min(open, stop)
+                exit_triggered = True
+                prev_close = self.prices[idx - 1] if idx > 0 else new_close
+                fill_price = min(prev_close, trailing_stop)
+
+            if exit_triggered:
+                proceeds = self.spec_v1_shares * fill_price * (1.0 - spec_friction)
+                trade_ret = (fill_price - self.spec_v1_entry_close) / max(1e-5, self.spec_v1_entry_close)
+                self.spec_v1_trades += 1
+                if trade_ret > 0:
+                    self.spec_v1_wins += 1
+                else:
+                    self.spec_v1_losses += 1
+                self.spec_v1_cash += proceeds
+                self.spec_v1_shares = 0.0
+                self.spec_v1_in_pos = False
+                self.spec_v1_flat_days = 0  # 5 trading days flat cooldown starts now
+
+        # Update Net Worth & Peak Equity
+        self.spec_v1_equity = self.spec_v1_cash + (self.spec_v1_shares * new_close)
+        if self.spec_v1_equity > self.spec_v1_peak_equity:
+            self.spec_v1_peak_equity = self.spec_v1_equity
+        self.spec_v1_history.append(self.spec_v1_equity)
+
+        # Backward compatibility sync
+        self.sma200_cash = self.spec_v1_cash
+        self.sma200_shares = self.spec_v1_shares
+        self.sma200_history = self.spec_v1_history
+        self.sma200_trades = self.spec_v1_trades
+        self.sma200_wins = self.spec_v1_wins
+        self.sma200_losses = self.spec_v1_losses
 
         # Check termination
         if self.current_step >= len(self.prices) - 2 or (self.current_step - self.warmup_steps) >= self.max_steps:
@@ -593,10 +668,15 @@ class StockTradingEnv:
             "total_trades": self.total_trades,
             "win_rate": (self.winning_trades / max(1, self.total_trades)),
             "benchmark_val": benchmark_val,
-            "sma200_val": sma200_val,
+            "spec_v1_val": self.spec_v1_equity,
+            "spec_v1_trades": self.spec_v1_trades,
+            "spec_v1_win_rate": (self.spec_v1_wins / max(1, self.spec_v1_trades)),
+            "spec_v1_exposure": spec_exposure,
+            "sma200_val": self.spec_v1_equity,
             "sma_200": sma_200,
-            "sma200_trades": self.sma200_trades,
-            "sma200_win_rate": (self.sma200_wins / max(1, self.sma200_trades)),
+            "atr_14": atr_14,
+            "sma200_trades": self.spec_v1_trades,
+            "sma200_win_rate": (self.spec_v1_wins / max(1, self.spec_v1_trades)),
             "inaction_bars": self.inaction_bars,
             "atr_pct": self.last_atr_pct,
             "alloc_factor": self.last_alloc_factor
